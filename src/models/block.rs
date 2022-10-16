@@ -1,6 +1,6 @@
 use super::blockchain::Blockchain;
 use chrono::prelude::*;
-use log::{info, trace};
+use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -17,7 +17,7 @@ pub struct Block {
 impl Block {
     // Create a new block. The hash will be calculated and set automatically.
     pub fn new(id: u64, previous_hash: String, data: String) -> Self {
-        trace!("creating block with id: {}", id);
+        info!("creating block with id: {}", id);
 
         Block {
             id,
@@ -52,6 +52,25 @@ impl Block {
                 info!("block mined! nonce found: {}", self.nonce);
                 break;
             }
+        }
+    }
+    pub fn validate(&mut self, blockchain: Blockchain) -> Result<(), &str> {
+        let last_block = blockchain.chain.last();
+
+        match last_block {
+            Some(last_block) => {
+                if self.previous_hash != last_block.hash {
+                    warn!("block with id: {} passed invalid previous_hash.", self.id);
+                    return Err("block passed invalid previous_hash.");
+                }
+                if self.id != last_block.id + 1 {
+                    warn!("invalid block id: {}", self.id);
+                    return Err("invalid block id.");
+                }
+                info!("valid block, beginning to mine now.");
+                return Ok(());
+            }
+            None => Err("Could not get latest block."),
         }
     }
 }

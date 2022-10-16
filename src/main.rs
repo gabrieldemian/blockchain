@@ -9,12 +9,12 @@ fn main() {
     // run this command (after building):
     // RUST_LOG=blockchain=info RUST_LOG=blockchain=debug ./target/debug/blockchain
 
-    let difficulty = 4;
+    let difficulty = 2;
     let mut blockchain = blockchain::Blockchain::new(difficulty);
 
-    blockchain::Blockchain::add_block(&mut blockchain, "mein zustand".to_string());
-    blockchain::Blockchain::add_block(&mut blockchain, "segundo bloco".to_string());
-    blockchain::Blockchain::add_block(&mut blockchain, "und du".to_string());
+    blockchain::Blockchain::add_block(&mut blockchain, "erste Block".to_string());
+    blockchain::Blockchain::add_block(&mut blockchain, "Ich liebe Fleisch".to_string());
+    blockchain::Blockchain::add_block(&mut blockchain, "und du?".to_string());
 
     debug!("state of blockchain: {:#?}", blockchain);
 }

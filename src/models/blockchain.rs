@@ -1,7 +1,7 @@
 use chrono::prelude::*;
 // Internal module
 use super::block::Block;
-use log::debug;
+use log::{debug, info, warn};
 
 type Blocks = Vec<Block>;
 
@@ -20,7 +20,7 @@ impl Blockchain {
             nonce: u64::default(),
             previous_hash: String::default(),
             hash: "000000000".to_string(),
-            data: "gott mit uns.".to_string(),
+            data: "Genesis".to_string(),
         };
         // Create chain starting from the genesis chain.
         let mut chain = Vec::new();
@@ -36,10 +36,17 @@ impl Blockchain {
             self.chain.last().unwrap().hash.clone(),
             data,
         );
-        // todo: validate block before minning
-        new_block.mine(self.clone());
-        self.chain.push(new_block.clone());
 
-        debug!("New block added to chain -> {:?}", new_block);
+        match new_block.validate(self.clone()) {
+            Ok(_) => {
+                new_block.mine(self.clone());
+                self.chain.push(new_block.clone());
+                debug!("New block added to chain -> {:?}", new_block);
+                info!("Block with id: {} was added to the chain.", new_block.id);
+            }
+            Err(_) => {
+                warn!("Could not add new block to the blockchain.");
+            }
+        }
     }
 }
