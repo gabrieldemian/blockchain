@@ -54,10 +54,14 @@ impl Block {
             }
         }
     }
-    pub fn validate(&mut self, blockchain: Blockchain) -> Result<(), &str> {
-        let last_block = blockchain.chain.last();
+    pub fn validate(&self, blockchain: Blockchain) -> Result<(), &str> {
+        let previous_block = if blockchain.chain.len() < 2 {
+            blockchain.chain.last()
+        } else {
+            blockchain.chain.get((self.id - 1 as u64) as usize)
+        };
 
-        match last_block {
+        match previous_block {
             Some(last_block) => {
                 if self.previous_hash != last_block.hash {
                     warn!("block with id: {} passed invalid previous_hash.", self.id);

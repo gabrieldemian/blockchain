@@ -1,6 +1,5 @@
-use chrono::prelude::*;
-// Internal module
 use super::block::Block;
+use chrono::prelude::*;
 use log::{debug, info, warn};
 
 type Blocks = Vec<Block>;
@@ -14,7 +13,7 @@ pub struct Blockchain {
 
 impl Blockchain {
     pub fn new(difficulty: usize) -> Self {
-        let genesis_block = Block {
+        let genesis = Block {
             id: 0,
             timestamp: Utc::now().timestamp_millis() as u64,
             nonce: u64::default(),
@@ -24,7 +23,7 @@ impl Blockchain {
         };
         // Create chain starting from the genesis chain.
         let mut chain = Vec::new();
-        chain.push(genesis_block.clone());
+        chain.push(genesis.clone());
         let blockchain = Blockchain { chain, difficulty };
         blockchain
     }
@@ -48,5 +47,31 @@ impl Blockchain {
                 warn!("Could not add new block to the blockchain.");
             }
         }
+    }
+    // Validate entire blockchain
+    pub fn validate(&self) -> Result<(), String> {
+        if self.chain.len() < 1 {
+            return Err("Blockchain has zero blocks and need at least 1 block.".to_string());
+        };
+        for i in 0..self.chain.len() {
+            // genesis block cant be validated
+            if i == 0 {
+                continue;
+            }
+
+            let curr_block = self.chain.get(i);
+
+            match curr_block {
+                Some(block) => {
+                    let result = Block::validate(block, self.clone());
+
+                    if let Some(_) = result.err() {
+                        return Err(format!("Block with id {i} is invalid."));
+                    }
+                }
+                None => return Err(format!("Could not get the block {i}")),
+            };
+        }
+        Ok(())
     }
 }
