@@ -74,4 +74,21 @@ impl Blockchain {
         }
         Ok(())
     }
+    // always choose the longest chain
+    pub fn choose_chain(&self, local: Blockchain, remote: Blockchain) -> Self {
+        let is_local_valid = local.validate().is_ok();
+        let is_remote_valid = remote.validate().is_ok();
+
+        if is_local_valid && is_remote_valid {
+            if local.chain.len() > remote.chain.len() {
+                return local;
+            } else {
+                return remote;
+            }
+        } else if is_local_valid {
+            return local;
+        } else {
+            return remote;
+        }
+    }
 }

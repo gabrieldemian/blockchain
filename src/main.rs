@@ -17,7 +17,6 @@ fn main() {
     // blockchain::Blockchain::add_block(&mut blockchain, "und du?".to_string());
 
     debug!("state of blockchain: {:#?}", blockchain);
-
     debug!("checking if blockchain is valid");
 
     let blockchain_state = blockchain::Blockchain::validate(&blockchain);
