@@ -3,6 +3,8 @@ use log::{debug, info, warn};
 use models::*;
 use pretty_env_logger;
 
+// use crate::models::p2p::AppBehaviour;
+
 fn main() {
     pretty_env_logger::init();
 
@@ -11,6 +13,7 @@ fn main() {
 
     let difficulty = 2;
     let mut blockchain = blockchain::Blockchain::new(difficulty);
+    // let p2p = AppBehaviour::new(&mut blockchain);
 
     blockchain::Blockchain::add_block(&mut blockchain, "erste Block".to_string());
     blockchain::Blockchain::add_block(&mut blockchain, "Ich liebe Fleisch".to_string());
