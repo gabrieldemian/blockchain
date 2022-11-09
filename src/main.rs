@@ -22,15 +22,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     blockchain::Blockchain::add_block(&mut blockchain, "Ich liebe Fleisch".to_string());
     // blockchain::Blockchain::add_block(&mut blockchain, "und du?".to_string());
 
-    debug!("state of blockchain: {:#?}", blockchain);
-    debug!("checking if blockchain is valid");
+    // debug!("state of blockchain: {:#?}", blockchain);
+    // debug!("checking if blockchain is valid");
 
-    let blockchain_state = blockchain::Blockchain::validate(&blockchain);
+    // let blockchain_state = blockchain::Blockchain::validate(&blockchain);
 
-    match blockchain_state {
-        Ok(_) => info!("Blockchain is valid."),
-        Err(e) => warn!("Your blockchain is FAKE bro. {}", e),
-    };
+    // match blockchain_state {
+    //     Ok(_) => info!("Blockchain is valid."),
+    //     Err(e) => warn!("Your blockchain is FAKE bro. {}", e),
+    // };
 
     Ok(())
 }
