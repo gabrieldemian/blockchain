@@ -1,11 +1,15 @@
 // use super::blockchain::Blockchain;
+use async_std::io;
+use futures::prelude::*;
 use libp2p::{
     core::upgrade,
-    gossipsub::{Gossipsub, GossipsubConfig, IdentTopic, MessageAuthenticity},
+    futures::{select, StreamExt},
+    gossipsub::{Gossipsub, GossipsubConfig, GossipsubEvent, IdentTopic, MessageAuthenticity},
     identity::Keypair,
-    mdns::{Mdns, MdnsConfig},
+    mdns::{MdnsEvent, TokioMdns},
     mplex,
     noise::NoiseAuthenticated,
+    swarm::{SwarmBuilder, SwarmEvent},
     tcp::{self, GenTcpConfig},
     Multiaddr, NetworkBehaviour, PeerId, Swarm, Transport,
 };
@@ -13,13 +17,14 @@ use once_cell::sync::Lazy;
 
 static LOCAL_KEY: Lazy<Keypair> = Lazy::new(|| Keypair::generate_ed25519());
 static LOCAL_PEER_ID: Lazy<PeerId> = Lazy::new(|| PeerId::from(LOCAL_KEY.public()));
+static TOPIC: Lazy<IdentTopic> = Lazy::new(|| IdentTopic::new("gossip"));
 
 // defines the behaviour of the current peer
 // on the network
 #[derive(NetworkBehaviour)]
 pub struct AppBehaviour {
     gossipsub: Gossipsub,
-    mdns: Mdns,
+    mdns: TokioMdns,
 }
 
 pub struct P2P {
@@ -29,7 +34,6 @@ pub struct P2P {
 impl P2P {
     pub fn new() -> Self {
         // encrypted TCP transport over mplex
-
         let transport_config = GenTcpConfig::new().port_reuse(true);
         let transport = tcp::TokioTcpTransport::new(transport_config)
             .upgrade(upgrade::Version::V1)
@@ -48,32 +52,86 @@ impl P2P {
         let mut gossipsub = Gossipsub::new(message_authenticity, gossipsub_config)
             .expect("could not create gossipsub");
 
-        // Create a Gossipsub topic
-        let topic = IdentTopic::new("gossip");
-
         gossipsub
-            .subscribe(&topic)
+            .subscribe(&TOPIC)
             .expect("could not subscribe to topic");
 
-        let mdns = Mdns::new(MdnsConfig::default()).unwrap();
-        let behaviour = AppBehaviour { gossipsub, mdns };
-
         // Create a Swarm to manage peers and events
-        let mut swarm = Swarm::new(transport, behaviour, LOCAL_PEER_ID.clone());
+        // let mut swarm = Swarm::new(transport, behaviour, LOCAL_PEER_ID.clone());
+        let mut swarm = {
+            let mdns = TokioMdns::new(Default::default()).unwrap();
+            let behaviour = AppBehaviour { gossipsub, mdns };
+            SwarmBuilder::new(transport, behaviour, LOCAL_PEER_ID.clone())
+                // We want the connection background tasks to be spawned
+                // onto the tokio runtime.
+                .executor(Box::new(|fut| {
+                    tokio::spawn(fut);
+                }))
+                .build()
+        };
 
         let addr: Multiaddr = "/ip4/0.0.0.0/tcp/0"
             .parse()
             .expect("could not parse multiaddr");
 
         println!("Listening on {:?}", addr);
-        println!("peerID {:?}", swarm.local_peer_id());
+        println!("{:?}", swarm.local_peer_id());
 
         swarm.listen_on(addr).expect("could not listen on swarm");
-
         swarm
             .connected_peers()
-            .for_each(|peer| println!("peer {}", peer));
+            .for_each(|peer| println!("peer: {:?}", peer));
 
         Self { swarm }
+    }
+
+    pub async fn listen_io(&mut self) {
+        let mut stdin = io::BufReader::new(io::stdin()).lines().fuse();
+
+        // Dial the peer identified by the multi-address given as the second
+        // command-line argument, if any.
+        if let Some(addr) = std::env::args().nth(1) {
+            let remote: Multiaddr = addr.parse().unwrap();
+            self.swarm.dial(remote).unwrap();
+            println!("Dialed {}", addr)
+        }
+
+        loop {
+            select! {line = stdin.select_next_some() => {
+                if let Err(e) = self.swarm
+                    .behaviour_mut().gossipsub
+                    .publish(TOPIC.clone(), line.expect("Stdin not to close").as_bytes()) {
+                        println!("Publish error: {:?}", e);
+                    }
+                },
+                event = self.swarm.select_next_some() => match event {
+                    SwarmEvent::NewListenAddr {
+                        address,
+                        listener_id
+                    } => {
+                        println!("{:?} listening on {:?}", listener_id, address);
+                    },
+                    SwarmEvent::Behaviour(AppBehaviourEvent::Gossipsub(GossipsubEvent::Message {
+                        message,
+                        message_id,
+                        propagation_source
+                    })) => {
+                        println!("Got message {} with id {message_id} from peer {propagation_source}", String::from_utf8_lossy(&message.data));
+                        self.swarm
+                            .behaviour()
+                            .gossipsub
+                            .all_peers()
+                            .for_each(|peer| println!("peer {:?}", peer));
+                    },
+                    SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Discovered(list))) => {
+                        for (peer_id, _multiaddr) in list {
+                            println!("mDNS discovered a new peer: {}", peer_id);
+                            self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                        }
+                    },
+                    _ => {}
+                }
+            }
+        }
     }
 }
