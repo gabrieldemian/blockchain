@@ -57,7 +57,6 @@ impl P2P {
             .expect("could not subscribe to topic");
 
         // Create a Swarm to manage peers and events
-        // let mut swarm = Swarm::new(transport, behaviour, LOCAL_PEER_ID.clone());
         let mut swarm = {
             let mdns = TokioMdns::new(Default::default()).unwrap();
             let behaviour = AppBehaviour { gossipsub, mdns };
@@ -86,16 +85,19 @@ impl P2P {
     }
 
     pub async fn listen_io(&mut self) {
+        // Listen for user input
         let mut stdin = io::BufReader::new(io::stdin()).lines().fuse();
 
         // Dial the peer identified by the multi-address given as the second
         // command-line argument, if any.
+        // cargo run /ip4/127.0.0.1/tcp/[port]
         if let Some(addr) = std::env::args().nth(1) {
             let remote: Multiaddr = addr.parse().unwrap();
             self.swarm.dial(remote).unwrap();
             println!("Dialed {}", addr)
         }
 
+        // Listen for events on the P2P network, and react to them
         loop {
             select! {line = stdin.select_next_some() => {
                 if let Err(e) = self.swarm
@@ -114,19 +116,31 @@ impl P2P {
                     SwarmEvent::Behaviour(AppBehaviourEvent::Gossipsub(GossipsubEvent::Message {
                         message,
                         message_id,
-                        propagation_source
+                        propagation_source: peer
                     })) => {
-                        println!("Got message {} with id {message_id} from peer {propagation_source}", String::from_utf8_lossy(&message.data));
-                        self.swarm
-                            .behaviour()
-                            .gossipsub
-                            .all_peers()
-                            .for_each(|peer| println!("peer {:?}", peer));
+                        // get the last 7 characters of the peerID
+                        let peer = peer.to_string();
+                        let truncated_peerid = peer[peer.len() - 7..].to_string();
+                        println!(
+                                "\n{truncated_peerid}: {}",
+                                String::from_utf8_lossy(&message.data)
+                            );
+                        // self.swarm
+                        //     .behaviour()
+                        //     .gossipsub
+                        //     .all_peers()
+                        //     .for_each(|peer| println!("peer {:?}", peer));
                     },
                     SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Discovered(list))) => {
                         for (peer_id, _multiaddr) in list {
                             println!("mDNS discovered a new peer: {}", peer_id);
                             self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                        }
+                    },
+                    SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Expired(list))) => {
+                        for (peer_id, _multiaddr) in list {
+                            println!("mDNS discover peer has expired: {}", peer_id);
+                            self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
                         }
                     },
                     _ => {}
