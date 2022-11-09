@@ -1,11 +1,14 @@
 mod models;
+use std::error::Error;
+
 use log::{debug, info, warn};
 use models::*;
 use pretty_env_logger;
 
-// use crate::models::p2p::AppBehaviour;
+use crate::models::p2p::P2P;
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     pretty_env_logger::init();
 
     // run this command (after building):
@@ -13,7 +16,7 @@ fn main() {
 
     let difficulty = 2;
     let mut blockchain = blockchain::Blockchain::new(difficulty);
-    // let p2p = AppBehaviour::new(&mut blockchain);
+    let p2p = P2P::new();
 
     blockchain::Blockchain::add_block(&mut blockchain, "erste Block".to_string());
     blockchain::Blockchain::add_block(&mut blockchain, "Ich liebe Fleisch".to_string());
@@ -28,4 +31,6 @@ fn main() {
         Ok(_) => info!("Blockchain is valid."),
         Err(e) => warn!("Your blockchain is FAKE bro. {}", e),
     };
+
+    Ok(())
 }
