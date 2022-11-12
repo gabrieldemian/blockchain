@@ -30,7 +30,6 @@ pub struct ChainResponse {
 }
 
 pub enum Event {
-    Fruit(String),
     Liebe,
 }
 
@@ -98,7 +97,7 @@ impl P2P {
 
         let difficulty = 2;
         let (tx, rx) = mpsc::unbounded_channel();
-        let blockchain = Blockchain::new(difficulty);
+        let blockchain = Blockchain::new(difficulty, tx.clone());
 
         Self {
             swarm,
@@ -127,7 +126,6 @@ impl P2P {
                 event = self.rx.recv() => {
                     if let Some(event) = event {
                         match event {
-                            Event::Fruit(name) => println!("fruit is {name}"),
                             Event::Liebe => println!("Liebe enum variant")
                         };
                     }
