@@ -1,9 +1,9 @@
-// use super::blockchain::Blockchain;
+use super::blockchain::Blockchain;
 use async_std::io;
 use futures::prelude::*;
 use libp2p::{
     core::upgrade,
-    futures::{select, StreamExt},
+    futures::StreamExt,
     gossipsub::{Gossipsub, GossipsubConfig, GossipsubEvent, IdentTopic, MessageAuthenticity},
     identity::Keypair,
     mdns::{MdnsEvent, TokioMdns},
@@ -14,10 +14,25 @@ use libp2p::{
     Multiaddr, NetworkBehaviour, PeerId, Swarm, Transport,
 };
 use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
+use tokio::{select, sync::mpsc};
+
+use super::block::Block;
 
 static LOCAL_KEY: Lazy<Keypair> = Lazy::new(|| Keypair::generate_ed25519());
 static LOCAL_PEER_ID: Lazy<PeerId> = Lazy::new(|| PeerId::from(LOCAL_KEY.public()));
 static TOPIC: Lazy<IdentTopic> = Lazy::new(|| IdentTopic::new("gossip"));
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ChainResponse {
+    pub blocks: Vec<Block>,
+    pub receiver: String,
+}
+
+pub enum Event {
+    Fruit(String),
+    Liebe,
+}
 
 // defines the behaviour of the current peer
 // on the network
@@ -29,6 +44,9 @@ pub struct AppBehaviour {
 
 pub struct P2P {
     pub swarm: Swarm<AppBehaviour>,
+    pub blockchain: Blockchain,
+    pub tx: mpsc::UnboundedSender<Event>,
+    pub rx: mpsc::UnboundedReceiver<Event>,
 }
 
 impl P2P {
@@ -60,7 +78,7 @@ impl P2P {
         let mut swarm = {
             let mdns = TokioMdns::new(Default::default()).unwrap();
             let behaviour = AppBehaviour { gossipsub, mdns };
-            SwarmBuilder::new(transport, behaviour, LOCAL_PEER_ID.clone())
+            SwarmBuilder::new(transport, behaviour, *LOCAL_PEER_ID)
                 // We want the connection background tasks to be spawned
                 // onto the tokio runtime.
                 .executor(Box::new(|fut| {
@@ -77,14 +95,20 @@ impl P2P {
         println!("{:?}", swarm.local_peer_id());
 
         swarm.listen_on(addr).expect("could not listen on swarm");
-        swarm
-            .connected_peers()
-            .for_each(|peer| println!("peer: {:?}", peer));
 
-        Self { swarm }
+        let difficulty = 2;
+        let (tx, rx) = mpsc::unbounded_channel();
+        let blockchain = Blockchain::new(difficulty);
+
+        Self {
+            swarm,
+            tx,
+            rx,
+            blockchain,
+        }
     }
 
-    pub async fn listen_io(&mut self) {
+    pub async fn daemon(&mut self) {
         // Listen for user input
         let mut stdin = io::BufReader::new(io::stdin()).lines().fuse();
 
@@ -99,14 +123,23 @@ impl P2P {
 
         // Listen for events on the P2P network, and react to them
         loop {
-            select! {line = stdin.select_next_some() => {
-                if let Err(e) = self.swarm
-                    .behaviour_mut().gossipsub
-                    .publish(TOPIC.clone(), line.expect("Stdin not to close").as_bytes()) {
-                        println!("Publish error: {:?}", e);
+            select! {
+                event = self.rx.recv() => {
+                    if let Some(event) = event {
+                        match event {
+                            Event::Fruit(name) => println!("fruit is {name}"),
+                            Event::Liebe => println!("Liebe enum variant")
+                        };
                     }
                 },
-                event = self.swarm.select_next_some() => match event {
+                line = stdin.select_next_some() => {
+                    if let Err(e) = self.swarm
+                        .behaviour_mut().gossipsub
+                        .publish(TOPIC.clone(), line.unwrap().as_bytes()) {
+                            println!("Publish error: {:?}", e);
+                        }
+                },
+                swarm_event = self.swarm.select_next_some() => match swarm_event {
                     SwarmEvent::NewListenAddr {
                         address,
                         listener_id
@@ -115,14 +148,14 @@ impl P2P {
                     },
                     SwarmEvent::Behaviour(AppBehaviourEvent::Gossipsub(GossipsubEvent::Message {
                         message,
-                        message_id,
-                        propagation_source: peer
+                        propagation_source: peer,
+                        ..
                     })) => {
                         // get the last 7 characters of the peerID
                         let peer = peer.to_string();
-                        let truncated_peerid = peer[peer.len() - 7..].to_string();
+                        let truncated_peer_id = peer[peer.len() - 7..].to_string();
                         println!(
-                                "\n{truncated_peerid}: {}",
+                                "\n{truncated_peer_id}: {}",
                                 String::from_utf8_lossy(&message.data)
                             );
                         // self.swarm

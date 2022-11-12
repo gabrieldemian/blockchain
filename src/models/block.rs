@@ -41,9 +41,8 @@ impl Block {
 
         format!("{:x}", result)
     }
-    pub fn mine(&mut self, blockchain: Blockchain) {
+    pub fn mine(&mut self, blockchain: &Blockchain) {
         info!("mining block...");
-
         loop {
             if !self.hash.starts_with(&"0".repeat(blockchain.difficulty)) {
                 self.nonce += 1;
@@ -54,7 +53,7 @@ impl Block {
             }
         }
     }
-    pub fn validate(&self, blockchain: Blockchain) -> Result<(), &str> {
+    pub fn validate(&self, blockchain: &Blockchain) -> Result<(), &str> {
         let previous_block = if blockchain.chain.len() < 2 {
             blockchain.chain.last()
         } else {

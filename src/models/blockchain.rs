@@ -36,10 +36,11 @@ impl Blockchain {
             data,
         );
 
-        match new_block.validate(self.clone()) {
+        match new_block.validate(self) {
             Ok(_) => {
-                new_block.mine(self.clone());
+                new_block.mine(self);
                 self.chain.push(new_block.clone());
+
                 debug!("New block added to chain -> {:?}", new_block);
                 info!("Block with id: {} was added to the chain.", new_block.id);
             }
@@ -57,13 +58,13 @@ impl Blockchain {
             // genesis block cant be validated
             if i == 0 {
                 continue;
-            }
+            };
 
             let curr_block = self.chain.get(i);
 
             match curr_block {
                 Some(block) => {
-                    let result = Block::validate(block, self.clone());
+                    let result = Block::validate(block, self);
 
                     if let Some(_) = result.err() {
                         return Err(format!("Block with id {i} is invalid."));

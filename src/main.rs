@@ -1,6 +1,6 @@
 mod models;
 // use log::{debug, info, warn};
-use models::*;
+use models::p2p::Event;
 use pretty_env_logger;
 
 use crate::models::p2p::P2P;
@@ -12,14 +12,15 @@ async fn main() {
     // run this command (after building):
     // RUST_LOG=blockchain=info RUST_LOG=blockchain=debug ./target/debug/blockchain
 
-    let difficulty = 2;
-    let mut blockchain = blockchain::Blockchain::new(difficulty);
     let mut p2p = P2P::new();
 
-    blockchain::Blockchain::add_block(&mut blockchain, "erste Block".to_string());
-    blockchain::Blockchain::add_block(&mut blockchain, "Ich liebe Fleisch".to_string());
+    p2p.blockchain.add_block("erste Block".to_string());
+    p2p.blockchain
+        .add_block("Du wirst der Beste sein.".to_string());
 
-    p2p.listen_io().await;
+    let _send_result = p2p.tx.send(Event::Fruit("mango".to_string()));
+
+    p2p.daemon().await;
 
     // blockchain::Blockchain::add_block(&mut blockchain, "und du?".to_string());
 
