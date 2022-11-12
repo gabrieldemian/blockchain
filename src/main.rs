@@ -1,6 +1,7 @@
 mod models;
 // use log::{debug, info, warn};
 use pretty_env_logger;
+use tokio::spawn;
 
 use crate::models::p2p::P2P;
 
@@ -8,16 +9,18 @@ use crate::models::p2p::P2P;
 async fn main() {
     pretty_env_logger::init();
 
-    // run this command (after building):
-    // RUST_LOG=blockchain=info RUST_LOG=blockchain=debug ./target/debug/blockchain
-
     let mut p2p = P2P::new();
 
-    p2p.blockchain.add_block("genesis".to_string());
-    p2p.blockchain
-        .add_block("Du wirst der Beste sein.".to_string());
+    let daemon_handle = spawn(async move {
+        p2p.daemon().await;
+    });
 
-    p2p.daemon().await;
+    let handle = spawn(async move {
+        println!("after daemon");
+    });
+
+    daemon_handle.await.unwrap();
+    handle.await.unwrap();
 
     // debug!("state of blockchain: {:#?}", blockchain);
     // debug!("checking if blockchain is valid");
