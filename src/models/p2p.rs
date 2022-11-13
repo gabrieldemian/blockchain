@@ -43,13 +43,11 @@ pub struct AppBehaviour {
 
 pub struct P2P {
     pub swarm: Swarm<AppBehaviour>,
-    pub blockchain: Blockchain,
-    pub tx: mpsc::UnboundedSender<Event>,
     pub rx: mpsc::UnboundedReceiver<Event>,
 }
 
 impl P2P {
-    pub fn new() -> Self {
+    pub fn new(blockchain: &mut Blockchain, rx: mpsc::UnboundedReceiver<Event>) -> Self {
         // encrypted TCP transport over mplex
         let transport_config = GenTcpConfig::new().port_reuse(true);
         let transport = tcp::TokioTcpTransport::new(transport_config)
@@ -95,16 +93,7 @@ impl P2P {
 
         swarm.listen_on(addr).expect("could not listen on swarm");
 
-        let difficulty = 2;
-        let (tx, rx) = mpsc::unbounded_channel();
-        let blockchain = Blockchain::new(difficulty, tx.clone());
-
-        Self {
-            swarm,
-            tx,
-            rx,
-            blockchain,
-        }
+        Self { swarm, rx }
     }
 
     pub async fn daemon(&mut self) {

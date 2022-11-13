@@ -1,7 +1,8 @@
 mod models;
+use models::{blockchain::Blockchain, p2p::Event};
 // use log::{debug, info, warn};
 use pretty_env_logger;
-use tokio::spawn;
+use tokio::{spawn, sync::mpsc};
 
 use crate::models::p2p::P2P;
 
@@ -9,14 +10,17 @@ use crate::models::p2p::P2P;
 async fn main() {
     pretty_env_logger::init();
 
-    let mut p2p = P2P::new();
+    let (tx, rx) = mpsc::unbounded_channel::<Event>();
+
+    let mut blockchain = Blockchain::new(2, tx.clone());
+    let mut p2p = P2P::new(&mut blockchain, rx);
 
     let daemon_handle = spawn(async move {
         p2p.daemon().await;
     });
 
     let handle = spawn(async move {
-        println!("after daemon");
+        blockchain.add_block("The vampire feed on the wars of mankind.".to_string());
     });
 
     daemon_handle.await.unwrap();
@@ -24,8 +28,6 @@ async fn main() {
 
     // debug!("state of blockchain: {:#?}", blockchain);
     // debug!("checking if blockchain is valid");
-
-    // let blockchain_state = blockchain::Blockchain::validate(&blockchain);
 
     // match blockchain_state {
     //     Ok(_) => info!("Blockchain is valid."),
