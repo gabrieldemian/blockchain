@@ -1,4 +1,6 @@
 mod models;
+use std::io::ErrorKind;
+
 use models::{blockchain::Blockchain, p2p::Event};
 // use log::{debug, info, warn};
 use pretty_env_logger;
@@ -12,7 +14,24 @@ async fn main() {
 
     let (tx, rx) = mpsc::unbounded_channel::<Event>();
 
-    let mut blockchain = Blockchain::new(2, tx.clone());
+    let blockchain = Blockchain::new(2, tx.clone()).await;
+
+    if let Err(ref e) = blockchain {
+        match e.kind() {
+            ErrorKind::PermissionDenied => {
+                println!(
+                    "The program does not have permission to write data to the blockchain file."
+                )
+            }
+            _ => {
+                println!("Untreated error while reading blockchain file.");
+                println!("err: {}", e);
+            }
+        }
+        // panic!("Breaking program due to fatal error.");
+    }
+
+    let mut blockchain = blockchain.unwrap();
     let mut p2p = P2P::new(&mut blockchain, rx);
 
     let daemon_handle = spawn(async move {

@@ -1,7 +1,12 @@
 use super::{block::Block, p2p::Event};
 use chrono::prelude::*;
 use log::{debug, error, info, warn};
-use tokio::sync::mpsc;
+use tokio::{
+    fs::{File, OpenOptions},
+    io::{self, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter},
+    spawn,
+    sync::mpsc,
+};
 
 type Blocks = Vec<Block>;
 
@@ -14,25 +19,57 @@ pub struct Blockchain {
 }
 
 impl Blockchain {
-    pub fn new(difficulty: usize, tx: mpsc::UnboundedSender<Event>) -> Self {
-        let genesis = Block {
-            id: 0,
-            timestamp: Utc::now().timestamp_millis() as u64,
-            nonce: u64::default(),
-            previous_hash: String::default(),
-            hash: "000000000".to_string(),
-            data: "Genesis".to_string(),
-        };
-        // Create chain starting from the genesis chain.
+    pub async fn new(difficulty: usize, tx: mpsc::UnboundedSender<Event>) -> io::Result<Self> {
+        let mut _buf = [0; 255];
+        let mut content = String::new();
         let mut chain = Vec::new();
-        chain.push(genesis.clone());
+        let file = OpenOptions::new()
+            .write(true)
+            .read(true)
+            .create(true)
+            .open("blockchain.json")
+            .await?;
+        let (mut rd, mut wt) = io::split(file);
+
+        wt.write_all(b"{\"teste\": \"vai funciona\"}").await?;
+        wt.shutdown().await?;
+
+        // wt.sync_data().await?;
+        // rd.flush().await?;
+
+        rd.read_to_string(&mut content).await?;
+
+        // loop {
+        //     match file.read(&mut buf).await {
+        //         Ok(0) => break,
+        //         Ok(n) => println!("bytes left: {n}"),
+        //         Err(_) => eprintln!("error happened"),
+        //     }
+        // }
+
+        // println!("buf {:?}", buf);
+        println!("content {:?}", content);
+
+        if 0 == 0 {
+            let genesis = Block {
+                id: 0,
+                timestamp: Utc::now().timestamp_millis() as u64,
+                nonce: u64::default(),
+                previous_hash: String::default(),
+                hash: "000000000".to_string(),
+                data: "Genesis".to_string(),
+            };
+            // Create chain starting from the genesis chain.
+            chain.push(genesis.clone());
+        }
 
         let blockchain = Blockchain {
             chain,
             difficulty,
             tx,
         };
-        blockchain
+
+        Ok(blockchain)
     }
     // a block will only be pushed to the blockchain,
     // once it has been validated and mined.
