@@ -3,42 +3,36 @@ use chrono::prelude::*;
 use log::{debug, error, info, warn};
 use speedy::Writable;
 use tokio::{
-    fs::OpenOptions,
-    io::{self, AsyncReadExt},
+    fs::{File, OpenOptions},
+    io::{self, AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf},
     sync::mpsc,
 };
 
-#[derive(Clone)]
 pub struct Blockchain {
     pub chain: Vec<Block>,
     pub difficulty: usize,
     pub tx: mpsc::UnboundedSender<Event>,
+    pub rd: ReadHalf<File>,
+    pub wt: WriteHalf<File>,
 }
 
 impl Blockchain {
-    pub async fn new(difficulty: usize, tx: mpsc::UnboundedSender<Event>) -> io::Result<Self> {
-        let mut buf = Vec::new();
-        let mut chain: Vec<Block> = Vec::new();
+    pub async fn open() -> io::Result<(ReadHalf<File>, WriteHalf<File>)> {
         let file = OpenOptions::new()
             .write(true)
             .read(true)
             .create(true)
-            .open("blockchain.json")
+            .open("blockchain")
             .await?;
-        let (mut rd, mut wt) = io::split(file);
+        Ok(io::split(file))
+    }
+    pub async fn new(difficulty: usize, tx: mpsc::UnboundedSender<Event>) -> io::Result<Self> {
+        let mut buf = Vec::new();
+        let mut chain: Vec<Block> = Vec::new();
 
-        // wt.write_all(b"{\"teste\": \"vai funciona POR AFVOR PORRA\"}")
-        //     .await?;
+        let (mut rd, mut wt) = self::Blockchain::open().await.unwrap();
 
         rd.read_to_end(&mut buf).await?;
-
-        // loop {
-        //     match file.read(&mut buf).await {
-        //         Ok(0) => break,
-        //         Ok(n) => println!("bytes left: {n}"),
-        //         Err(_) => eprintln!("error happened"),
-        //     }
-        // }
 
         if buf.len() == 0 {
             let genesis = Block {
@@ -51,16 +45,21 @@ impl Blockchain {
             };
             // Create chain starting from the genesis chain.
             chain.push(genesis.clone());
-        }
 
-        let chain_bytes = chain.write_to_vec()?;
-        println!("chain: {:?}", chain);
-        println!("chain bytes: {:?}", chain_bytes);
+            // Write the data into the blockchain file.
+            let chain_bytes = chain.write_to_vec()?;
+            wt.write_all(&chain_bytes[..]).await?;
+
+            println!("chain: {:?}", chain);
+            println!("chain bytes: {:?}", chain_bytes);
+        }
 
         let blockchain = Blockchain {
             chain,
             difficulty,
             tx,
+            rd,
+            wt,
         };
 
         Ok(blockchain)
@@ -68,6 +67,10 @@ impl Blockchain {
     // a block will only be pushed to the blockchain,
     // once it has been validated and mined.
     pub fn add_block(&mut self, data: String) {
+        let last_block = self.get_previous_block();
+
+        print!("last block is {:?}", self.chain);
+
         let mut new_block = Block::new(
             self.chain.len() as u64,
             self.chain.last().unwrap().hash.clone(),
@@ -93,36 +96,10 @@ impl Blockchain {
             }
         }
     }
-    // Validate entire blockchain
-    pub fn validate(&self) -> Result<(), String> {
-        if self.chain.len() < 1 {
-            return Err("Blockchain has zero blocks and need at least 1 block.".to_string());
-        };
-        for i in 0..self.chain.len() {
-            // genesis block cant be validated
-            if i == 0 {
-                continue;
-            };
-
-            let curr_block = self.chain.get(i);
-
-            match curr_block {
-                Some(block) => {
-                    let result = Block::validate(block, self);
-
-                    if let Some(_) = result.err() {
-                        return Err(format!("Block with id {i} is invalid."));
-                    }
-                }
-                None => return Err(format!("Could not get the block {i}")),
-            };
-        }
-        Ok(())
-    }
     // always choose the longest chain
     pub fn choose_chain(&self, local: Blockchain, remote: Blockchain) -> Self {
         let is_local_valid = local.validate().is_ok();
-        let is_remote_valid = remote.validate().is_ok();
+        let is_remote_valid = local.validate().is_ok();
 
         if is_local_valid && is_remote_valid {
             if local.chain.len() > remote.chain.len() {
@@ -135,5 +112,41 @@ impl Blockchain {
         } else {
             return remote;
         }
+    }
+    pub fn get_previous_block(&self) -> Option<&Block> {
+        let last = self.chain.last();
+
+        let previous_block = if self.chain.len() < 2 {
+            last
+        } else {
+            self.chain.get((last.unwrap().id - 1 as u64) as usize)
+        };
+
+        previous_block
+    }
+    // Validate entire blockchain
+    pub fn validate(&self) -> Result<(), String> {
+        let chain = &self.chain;
+
+        if chain.len() < 1 {
+            return Err("Blockchain has zero blocks and need at least 1 block.".to_string());
+        };
+
+        for i in 0..chain.len() {
+            // genesis block cant be validated
+            if i == 0 {
+                continue;
+            };
+
+            let curr_block = chain.get(i);
+
+            if let Some(curr_block) = curr_block {
+                let result = curr_block.validate(self);
+                if result.is_err() {
+                    return Err(format!("Block with id {i} is invalid."));
+                }
+            }
+        }
+        Ok(())
     }
 }

@@ -1,5 +1,4 @@
-use super::blockchain::Blockchain;
-use crate::models::block::Block;
+use crate::models::{block::Block, blockchain::Blockchain};
 
 use async_std::io;
 use futures::prelude::*;
@@ -17,7 +16,7 @@ use libp2p::{
 };
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use speedy::{Readable, Writable};
+use speedy::Readable;
 use tokio::{select, sync::mpsc};
 
 static LOCAL_KEY: Lazy<Keypair> = Lazy::new(|| Keypair::generate_ed25519());
@@ -95,11 +94,7 @@ impl P2P {
 
         swarm.listen_on(addr).expect("could not listen on swarm");
 
-        Self {
-            swarm,
-            rx,
-            // blockchain,
-        }
+        Self { swarm, rx }
     }
 
     pub async fn daemon(&mut self) {
@@ -123,7 +118,8 @@ impl P2P {
                         match event {
                             Event::BlockMined(mut blocks) => {
                                 // let chain = &mut self.blockchain.chain;
-                                let rcv_chain: Vec<Block> = Vec::<Block>::read_from_buffer(&mut blocks[..]).unwrap();
+                                let rcv_chain =
+                                    Vec::<Block>::read_from_buffer(&mut blocks[..]).unwrap();
 
                                 // println!("old chain was: {:?}", chain);
                                 println!("received this chain? {:?}", rcv_chain);
