@@ -1,10 +1,10 @@
 use super::blockchain::Blockchain;
 use chrono::prelude::*;
 use log::{info, warn};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use speedy::{Readable, Writable};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug, Clone, Writable, Readable)]
 pub struct Block {
     pub id: u64,
     pub hash: String,
@@ -32,7 +32,7 @@ impl Block {
         let mut block_data = self.clone();
         block_data.hash = String::default();
 
-        let serialized_block_data = serde_json::to_string(&block_data).unwrap();
+        let serialized_block_data = block_data.write_to_vec().unwrap();
 
         let mut hasher = Sha256::new();
         hasher.update(serialized_block_data);

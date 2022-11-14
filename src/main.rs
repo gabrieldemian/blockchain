@@ -28,11 +28,11 @@ async fn main() {
                 println!("err: {}", e);
             }
         }
-        // panic!("Breaking program due to fatal error.");
+        panic!("Breaking program due to fatal error.");
     }
 
     let mut blockchain = blockchain.unwrap();
-    let mut p2p = P2P::new(&mut blockchain, rx);
+    let mut p2p = P2P::new(rx);
 
     let daemon_handle = spawn(async move {
         p2p.daemon().await;

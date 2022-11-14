@@ -1,28 +1,24 @@
 use super::{block::Block, p2p::Event};
 use chrono::prelude::*;
 use log::{debug, error, info, warn};
+use speedy::Writable;
 use tokio::{
-    fs::{File, OpenOptions},
-    io::{self, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter},
-    spawn,
+    fs::OpenOptions,
+    io::{self, AsyncReadExt},
     sync::mpsc,
 };
 
-type Blocks = Vec<Block>;
-
 #[derive(Clone)]
 pub struct Blockchain {
-    pub chain: Blocks,
-    // Minimum amount of work required to validate a block.
+    pub chain: Vec<Block>,
     pub difficulty: usize,
     pub tx: mpsc::UnboundedSender<Event>,
 }
 
 impl Blockchain {
     pub async fn new(difficulty: usize, tx: mpsc::UnboundedSender<Event>) -> io::Result<Self> {
-        let mut _buf = [0; 255];
-        let mut content = String::new();
-        let mut chain = Vec::new();
+        let mut buf = Vec::new();
+        let mut chain: Vec<Block> = Vec::new();
         let file = OpenOptions::new()
             .write(true)
             .read(true)
@@ -31,13 +27,10 @@ impl Blockchain {
             .await?;
         let (mut rd, mut wt) = io::split(file);
 
-        wt.write_all(b"{\"teste\": \"vai funciona\"}").await?;
-        wt.shutdown().await?;
+        // wt.write_all(b"{\"teste\": \"vai funciona POR AFVOR PORRA\"}")
+        //     .await?;
 
-        // wt.sync_data().await?;
-        // rd.flush().await?;
-
-        rd.read_to_string(&mut content).await?;
+        rd.read_to_end(&mut buf).await?;
 
         // loop {
         //     match file.read(&mut buf).await {
@@ -47,10 +40,7 @@ impl Blockchain {
         //     }
         // }
 
-        // println!("buf {:?}", buf);
-        println!("content {:?}", content);
-
-        if 0 == 0 {
+        if buf.len() == 0 {
             let genesis = Block {
                 id: 0,
                 timestamp: Utc::now().timestamp_millis() as u64,
@@ -62,6 +52,10 @@ impl Blockchain {
             // Create chain starting from the genesis chain.
             chain.push(genesis.clone());
         }
+
+        let chain_bytes = chain.write_to_vec()?;
+        println!("chain: {:?}", chain);
+        println!("chain bytes: {:?}", chain_bytes);
 
         let blockchain = Blockchain {
             chain,
@@ -85,7 +79,9 @@ impl Blockchain {
                 new_block.mine(self);
                 self.chain.push(new_block.clone());
 
-                if let Err(_) = self.tx.send(Event::Liebe) {
+                let chain = self.chain.write_to_vec().unwrap();
+
+                if let Err(_) = self.tx.send(Event::BlockMined(chain)) {
                     error!("Failed to send event to the network that the block was mined.");
                 };
 

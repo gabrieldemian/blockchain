@@ -1,4 +1,6 @@
 use super::blockchain::Blockchain;
+use crate::models::block::Block;
+
 use async_std::io;
 use futures::prelude::*;
 use libp2p::{
@@ -15,9 +17,8 @@ use libp2p::{
 };
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use speedy::{Readable, Writable};
 use tokio::{select, sync::mpsc};
-
-use super::block::Block;
 
 static LOCAL_KEY: Lazy<Keypair> = Lazy::new(|| Keypair::generate_ed25519());
 static LOCAL_PEER_ID: Lazy<PeerId> = Lazy::new(|| PeerId::from(LOCAL_KEY.public()));
@@ -25,12 +26,12 @@ static TOPIC: Lazy<IdentTopic> = Lazy::new(|| IdentTopic::new("gossip"));
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChainResponse {
-    pub blocks: Vec<Block>,
+    pub blocks: Vec<u8>,
     pub receiver: String,
 }
 
 pub enum Event {
-    Liebe,
+    BlockMined(Vec<u8>),
 }
 
 // defines the behaviour of the current peer
@@ -44,10 +45,11 @@ pub struct AppBehaviour {
 pub struct P2P {
     pub swarm: Swarm<AppBehaviour>,
     pub rx: mpsc::UnboundedReceiver<Event>,
+    // pub blockchain: Blockchain,
 }
 
 impl P2P {
-    pub fn new(blockchain: &mut Blockchain, rx: mpsc::UnboundedReceiver<Event>) -> Self {
+    pub fn new(rx: mpsc::UnboundedReceiver<Event>) -> Self {
         // encrypted TCP transport over mplex
         let transport_config = GenTcpConfig::new().port_reuse(true);
         let transport = tcp::TokioTcpTransport::new(transport_config)
@@ -93,7 +95,11 @@ impl P2P {
 
         swarm.listen_on(addr).expect("could not listen on swarm");
 
-        Self { swarm, rx }
+        Self {
+            swarm,
+            rx,
+            // blockchain,
+        }
     }
 
     pub async fn daemon(&mut self) {
@@ -115,7 +121,13 @@ impl P2P {
                 event = self.rx.recv() => {
                     if let Some(event) = event {
                         match event {
-                            Event::Liebe => println!("Liebe enum variant")
+                            Event::BlockMined(mut blocks) => {
+                                // let chain = &mut self.blockchain.chain;
+                                let rcv_chain: Vec<Block> = Vec::<Block>::read_from_buffer(&mut blocks[..]).unwrap();
+
+                                // println!("old chain was: {:?}", chain);
+                                println!("received this chain? {:?}", rcv_chain);
+                            }
                         };
                     }
                 },
