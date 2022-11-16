@@ -17,7 +17,7 @@ use libp2p::{
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use speedy::Readable;
-use tokio::{select, sync::mpsc};
+use tokio::{io::AsyncWriteExt, select, sync::mpsc};
 
 static LOCAL_KEY: Lazy<Keypair> = Lazy::new(|| Keypair::generate_ed25519());
 static LOCAL_PEER_ID: Lazy<PeerId> = Lazy::new(|| PeerId::from(LOCAL_KEY.public()));
@@ -117,12 +117,26 @@ impl P2P {
                     if let Some(event) = event {
                         match event {
                             Event::BlockMined(mut blocks) => {
-                                // let chain = &mut self.blockchain.chain;
                                 let rcv_chain =
                                     Vec::<Block>::read_from_buffer(&mut blocks[..]).unwrap();
 
-                                // println!("old chain was: {:?}", chain);
-                                println!("received this chain? {:?}", rcv_chain);
+                                println!("block mined, received new chain? {:#?}", rcv_chain);
+                                println!("\n -- validating entire new blockchain... --");
+
+                                let is_valid = Block::validate_all(&rcv_chain).is_ok();
+
+                                if is_valid {
+                                    println!("chain is valid");
+                                    let mut file = Blockchain::open().await;
+                                    match file.write_all(&blocks[..]).await {
+                                        Ok(_) => {
+                                            println!("The new blockchain was written on the file")
+                                        },
+                                        Err(_) => println!("error trying to write new blockchain to the file")
+                                    }
+                                } else {
+                                    println!("chain is invalid");
+                                }
                             }
                         };
                     }

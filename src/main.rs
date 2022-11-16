@@ -39,17 +39,19 @@ async fn main() {
     });
 
     let handle = spawn(async move {
-        blockchain.add_block("The vampire feed on the wars of mankind.".to_string());
+        blockchain
+            .add_block("This will be the third".to_string())
+            .await;
     });
+
+    // let handletwo = spawn(async move {
+    //     let mut blockchain = Blockchain::new(2, tx.clone()).await.unwrap();
+    //     blockchain
+    //         .add_block("Something something".to_string())
+    //         .await;
+    // });
 
     daemon_handle.await.unwrap();
     handle.await.unwrap();
-
-    // debug!("state of blockchain: {:#?}", blockchain);
-    // debug!("checking if blockchain is valid");
-
-    // match blockchain_state {
-    //     Ok(_) => info!("Blockchain is valid."),
-    //     Err(e) => warn!("Your blockchain is FAKE bro. {}", e),
-    // };
+    // handletwo.await.unwrap();
 }

@@ -53,23 +53,62 @@ impl Block {
             }
         }
     }
-    pub fn validate(&self, blockchain: &Blockchain) -> Result<(), &str> {
-        let previous_block = blockchain.get_previous_block();
+    pub async fn validate(&self, blockchain: &mut Blockchain) -> Result<(), String> {
+        let previous_block = blockchain
+            .get_latest_block()
+            .await
+            .map_err(|e| e.to_string())?;
 
-        match previous_block {
-            Some(last_block) => {
-                if self.previous_hash != last_block.hash {
-                    warn!("block with id: {} passed invalid previous_hash.", self.id);
-                    return Err("block passed invalid previous_hash.");
-                }
-                if self.id != last_block.id + 1 {
-                    warn!("invalid block id: {}", self.id);
-                    return Err("invalid block id.");
-                }
-                info!("valid block, beginning to mine now.");
-                return Ok(());
-            }
-            None => Err("Could not get latest block."),
+        println!("-- validating new block --");
+        println!("prev {:#?}", previous_block);
+        println!("curent to be added {:#?}", self);
+
+        if self.previous_hash != previous_block.hash {
+            warn!("block with id: {} passed invalid previous_hash.", self.id);
+            return Err("block passed invalid previous_hash.".to_string());
         }
+        if self.id != previous_block.id + 1 {
+            warn!("invalid block id: {}", self.id);
+            return Err("invalid block id.".to_string());
+        }
+        info!("valid block, beginning to mine now.");
+        return Ok(());
+    }
+    pub fn validate_all(blocks: &Vec<Block>) -> Result<(), String> {
+        for i in 0..blocks.len() {
+            // genesis block cant be validated
+            if i == 0 {
+                continue;
+            };
+
+            let current_block = blocks.get(i);
+
+            let previous_block = blocks
+                .get((current_block.unwrap().id - 1 as u64) as usize)
+                .unwrap()
+                .to_owned();
+
+            println!("to be validated {:#?}", blocks);
+
+            // println!("current {:#?}", current_block.unwrap());
+            // println!("previous {:#?}", previous_block);
+
+            if let Some(current_block) = current_block {
+                if current_block.previous_hash != previous_block.hash {
+                    warn!(
+                        "block with id: {} passed invalid previous_hash.",
+                        current_block.id
+                    );
+                    return Err("block passed invalid previous_hash.".to_string());
+                }
+                if current_block.id != previous_block.id + 1 {
+                    warn!("invalid block id: {}", current_block.id);
+                    return Err("invalid block id.".to_string());
+                }
+            } else {
+                return Err("Could not get block with id {i}".to_string());
+            }
+        }
+        Ok(())
     }
 }
