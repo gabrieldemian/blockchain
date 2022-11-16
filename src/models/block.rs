@@ -1,8 +1,9 @@
 use super::blockchain::Blockchain;
 use chrono::prelude::*;
-use log::{info, warn};
+use log::{debug, info, warn};
 use sha2::{Digest, Sha256};
 use speedy::{Readable, Writable};
+use tokio::time::Instant;
 
 #[derive(Debug, Clone, Writable, Readable)]
 pub struct Block {
@@ -17,8 +18,6 @@ pub struct Block {
 impl Block {
     // Create a new block. The hash will be calculated and set automatically.
     pub fn new(id: u64, previous_hash: String, data: String) -> Self {
-        info!("creating block with id: {}", id);
-
         Block {
             id,
             hash: String::default(),
@@ -42,13 +41,17 @@ impl Block {
         format!("{:x}", result)
     }
     pub fn mine(&mut self, blockchain: &Blockchain) {
-        info!("mining block...");
+        let now = Instant::now();
         loop {
             if !self.hash.starts_with(&"0".repeat(blockchain.difficulty)) {
                 self.nonce += 1;
                 self.hash = self.calculate_hash();
             } else {
-                info!("block mined! nonce found: {}", self.nonce);
+                info!(
+                    "block mined in {}s with nonce: \"{}\"",
+                    now.elapsed().as_secs(),
+                    self.nonce
+                );
                 break;
             }
         }
@@ -59,9 +62,9 @@ impl Block {
             .await
             .map_err(|e| e.to_string())?;
 
-        println!("-- validating new block --");
-        println!("prev {:#?}", previous_block);
-        println!("curent to be added {:#?}", self);
+        debug!("-- validating new block --");
+        debug!("prev {:#?}", previous_block);
+        debug!("curent to be added {:#?}", self);
 
         if self.previous_hash != previous_block.hash {
             warn!("block with id: {} passed invalid previous_hash.", self.id);
@@ -71,7 +74,7 @@ impl Block {
             warn!("invalid block id: {}", self.id);
             return Err("invalid block id.".to_string());
         }
-        info!("valid block, beginning to mine now.");
+        info!("valid block, beginning to mine now...");
         return Ok(());
     }
     pub fn validate_all(blocks: &Vec<Block>) -> Result<(), String> {
@@ -87,8 +90,6 @@ impl Block {
                 .get((current_block.unwrap().id - 1 as u64) as usize)
                 .unwrap()
                 .to_owned();
-
-            println!("to be validated {:#?}", blocks);
 
             // println!("current {:#?}", current_block.unwrap());
             // println!("previous {:#?}", previous_block);

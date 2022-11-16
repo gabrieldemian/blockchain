@@ -6,6 +6,7 @@ use tokio::{
     fs::{File, OpenOptions},
     io::{self, AsyncReadExt, AsyncWriteExt},
     sync::mpsc,
+    time::Instant,
 };
 
 #[derive(Clone)]
@@ -56,14 +57,18 @@ impl Blockchain {
     pub async fn read_all_buf(&mut self) -> io::Result<Vec<u8>> {
         let mut buf: Vec<u8> = Vec::new();
         Blockchain::open().await.read_to_end(&mut buf).await?;
-
         // println!("read_all_buf buffer: {:?}", buf);
 
         Ok(buf)
     }
     async fn read_all(&mut self) -> io::Result<Vec<Block>> {
+        let now = Instant::now();
         let buf: Vec<u8> = self.read_all_buf().await.expect("read all buf");
         let chain = Vec::<Block>::read_from_buffer(&buf[..]).expect("to read from buffer");
+        info!(
+            "took {}μs to read the blockchain.",
+            now.elapsed().as_micros()
+        );
 
         Ok(chain)
     }
@@ -75,7 +80,12 @@ impl Blockchain {
             .await
             .expect("to read blockchain before add block");
 
-        println!("\ninitial state of the blockchain: {:#?}", blockchain);
+        debug!("\n blockchain before mining new block: {:#?}", blockchain);
+        info!(
+            "Received block with id \"{}\" and data: \"{}\"",
+            blockchain.len(),
+            data
+        );
 
         let mut new_block = Block::new(
             blockchain.len() as u64,
@@ -87,7 +97,7 @@ impl Blockchain {
             Ok(_) => {
                 new_block.mine(self);
 
-                println!("block is valid ----------------");
+                debug!("block to be added is valid");
 
                 blockchain.push(new_block.clone());
 
@@ -96,12 +106,9 @@ impl Blockchain {
                 if let Err(_) = self.tx.send(Event::BlockMined(chain)) {
                     error!("Failed to send event to the network that the block was mined.");
                 };
-
-                debug!("New block added to chain -> {:?}", new_block);
-                info!("Block with id: {} was added to the chain.", new_block.id);
             }
             Err(_) => {
-                println!("block is invalid!!");
+                debug!("block is invalid!");
                 warn!("Could not add new block to the blockchain.");
             }
         }
@@ -137,13 +144,6 @@ impl Blockchain {
 
         Ok(latest)
     }
-    // pub async fn get_previous_block(&mut self) -> Result<Block, io::Error> {
-    //     let chain = self.read_all().await?;
-
-    //     let previous_block = if chain.last().unwrap().id == 0 { chain.last }
-
-    //     Ok(previous_block)
-    // }
     // Validate entire blockchain
     pub async fn validate(&mut self) -> Result<(), String> {
         // read blockchain from the file.

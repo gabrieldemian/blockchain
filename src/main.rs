@@ -2,7 +2,6 @@ mod models;
 use std::io::ErrorKind;
 
 use models::{blockchain::Blockchain, p2p::Event};
-// use log::{debug, info, warn};
 use pretty_env_logger;
 use tokio::{spawn, sync::mpsc};
 
@@ -10,11 +9,12 @@ use crate::models::p2p::P2P;
 
 #[tokio::main]
 async fn main() {
+    // RUST_LOG=info cargo run
     pretty_env_logger::init();
 
     let (tx, rx) = mpsc::unbounded_channel::<Event>();
 
-    let blockchain = Blockchain::new(2, tx.clone()).await;
+    let blockchain = Blockchain::new(5, tx.clone()).await;
 
     if let Err(ref e) = blockchain {
         match e.kind() {
@@ -38,20 +38,16 @@ async fn main() {
         p2p.daemon().await;
     });
 
+    // data race if I try to add 2 blocks
     let handle = spawn(async move {
         blockchain
-            .add_block("This will be the third".to_string())
+            .add_block("This will be the second".to_string())
             .await;
+        // blockchain
+        //     .add_block("May God have mercy on me".to_string())
+        //     .await;
     });
-
-    // let handletwo = spawn(async move {
-    //     let mut blockchain = Blockchain::new(2, tx.clone()).await.unwrap();
-    //     blockchain
-    //         .add_block("Something something".to_string())
-    //         .await;
-    // });
 
     daemon_handle.await.unwrap();
     handle.await.unwrap();
-    // handletwo.await.unwrap();
 }

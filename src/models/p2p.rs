@@ -14,10 +14,11 @@ use libp2p::{
     tcp::{self, GenTcpConfig},
     Multiaddr, NetworkBehaviour, PeerId, Swarm, Transport,
 };
+use log::{debug, info, warn};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use speedy::Readable;
-use tokio::{io::AsyncWriteExt, select, sync::mpsc};
+use tokio::{io::AsyncWriteExt, select, sync::mpsc, time::Instant};
 
 static LOCAL_KEY: Lazy<Keypair> = Lazy::new(|| Keypair::generate_ed25519());
 static LOCAL_PEER_ID: Lazy<PeerId> = Lazy::new(|| PeerId::from(LOCAL_KEY.public()));
@@ -44,7 +45,6 @@ pub struct AppBehaviour {
 pub struct P2P {
     pub swarm: Swarm<AppBehaviour>,
     pub rx: mpsc::UnboundedReceiver<Event>,
-    // pub blockchain: Blockchain,
 }
 
 impl P2P {
@@ -114,32 +114,34 @@ impl P2P {
         loop {
             select! {
                 event = self.rx.recv() => {
-                    if let Some(event) = event {
-                        match event {
-                            Event::BlockMined(mut blocks) => {
-                                let rcv_chain =
-                                    Vec::<Block>::read_from_buffer(&mut blocks[..]).unwrap();
+                    match event.unwrap() {
+                        Event::BlockMined(mut blocks) => {
+                            let rcv_chain =
+                                Vec::<Block>::read_from_buffer(&mut blocks[..]).unwrap();
 
-                                println!("block mined, received new chain? {:#?}", rcv_chain);
-                                println!("\n -- validating entire new blockchain... --");
+                            info!("validating chain with the new block... {:#?}", rcv_chain);
 
-                                let is_valid = Block::validate_all(&rcv_chain).is_ok();
+                            let now = Instant::now();
+                            let is_valid = Block::validate_all(&rcv_chain).is_ok();
 
-                                if is_valid {
-                                    println!("chain is valid");
-                                    let mut file = Blockchain::open().await;
-                                    match file.write_all(&blocks[..]).await {
-                                        Ok(_) => {
-                                            println!("The new blockchain was written on the file")
-                                        },
-                                        Err(_) => println!("error trying to write new blockchain to the file")
-                                    }
-                                } else {
-                                    println!("chain is invalid");
+                            if is_valid {
+                                info!("chain is valid and took {}ms to validate", now.elapsed().as_millis());
+                                debug!("chain is valid");
+                                let mut file = Blockchain::open().await;
+                                match file.write_all(&blocks[..]).await {
+                                    Ok(_) => {
+                                        info!(
+                                            "The new blockchain was written in {}μs with success",
+                                            now.elapsed().as_micros()
+                                        );
+                                    },
+                                    Err(_) => warn!("error trying to write new blockchain to the file")
                                 }
+                            } else {
+                                warn!("chain is invalid");
                             }
-                        };
-                    }
+                        }
+                    };
                 },
                 line = stdin.select_next_some() => {
                     if let Err(e) = self.swarm
