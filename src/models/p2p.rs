@@ -1,11 +1,12 @@
 use crate::models::{block::Block, blockchain::Blockchain};
-
 use async_std::io;
 use futures::prelude::*;
 use libp2p::{
     core::upgrade,
     futures::StreamExt,
-    gossipsub::{Gossipsub, GossipsubConfig, GossipsubEvent, IdentTopic, MessageAuthenticity},
+    gossipsub::{
+        Gossipsub, GossipsubConfig, GossipsubEvent, IdentTopic, MessageAuthenticity, TopicHash,
+    },
     identity::Keypair,
     mdns::{MdnsEvent, TokioMdns},
     mplex,
@@ -45,10 +46,11 @@ pub struct AppBehaviour {
 pub struct P2P {
     pub swarm: Swarm<AppBehaviour>,
     pub rx: mpsc::UnboundedReceiver<Event>,
+    pub blockchain: Blockchain,
 }
 
 impl P2P {
-    pub fn new(rx: mpsc::UnboundedReceiver<Event>) -> Self {
+    pub fn new(rx: mpsc::UnboundedReceiver<Event>, blockchain: Blockchain) -> Self {
         // encrypted TCP transport over mplex
         let transport_config = GenTcpConfig::new().port_reuse(true);
         let transport = tcp::TokioTcpTransport::new(transport_config)
@@ -94,7 +96,11 @@ impl P2P {
 
         swarm.listen_on(addr).expect("could not listen on swarm");
 
-        Self { swarm, rx }
+        Self {
+            swarm,
+            rx,
+            blockchain,
+        }
     }
 
     pub async fn daemon(&mut self) {
@@ -109,6 +115,21 @@ impl P2P {
             self.swarm.dial(remote).unwrap();
             println!("Dialed {}", addr)
         }
+
+        let message =
+            "Welcome! type \"ls peers/blockchain\" to list, and \"block [data]\" to send a block."
+                .to_string();
+        let lines: String = message.chars().map(|_| "-").collect();
+
+        println!("\n  {lines}");
+        println!("< {message} >");
+        println!("  {lines}");
+        println!("    \\   ^__^");
+        println!("     \\  (oo)\\______");
+        println!("        (__)\\      )\\/\\");
+        println!("           ||----w |");
+        println!("           ||     ||");
+        println!("\n");
 
         // Listen for events on the P2P network, and react to them
         loop {
@@ -144,18 +165,36 @@ impl P2P {
                     };
                 },
                 line = stdin.select_next_some() => {
-                    if let Err(e) = self.swarm
-                        .behaviour_mut().gossipsub
-                        .publish(TOPIC.clone(), line.unwrap().as_bytes()) {
-                            println!("Publish error: {:?}", e);
-                        }
+                    let msg = line.unwrap();
+
+                    match msg.as_str() {
+                        "ls blockchain" => {
+                            let chain = self.blockchain.read_all().await.unwrap();
+                            println!("{:#?}", chain);
+                        },
+                        "ls peers" => {
+                            let peers: Vec<(&PeerId, Vec<&TopicHash>)> = self.swarm
+                                .behaviour()
+                                .gossipsub
+                                .all_peers().collect();
+                            println!("{:#?}", peers);
+                        },
+                        _ => println!("You typed an unknown command.")
+                    }
                 },
+                // line = stdin.select_next_some() => {
+                //     if let Err(e) = self.swarm
+                //         .behaviour_mut().gossipsub
+                //         .publish(TOPIC.clone(), line.unwrap().as_bytes()) {
+                //             println!("Publish error: {:?}", e);
+                //         }
+                // },
                 swarm_event = self.swarm.select_next_some() => match swarm_event {
                     SwarmEvent::NewListenAddr {
                         address,
                         listener_id
                     } => {
-                        println!("{:?} listening on {:?}", listener_id, address);
+                        info!("{:?} listening on {:?}", listener_id, address);
                     },
                     SwarmEvent::Behaviour(AppBehaviourEvent::Gossipsub(GossipsubEvent::Message {
                         message,
@@ -177,13 +216,13 @@ impl P2P {
                     },
                     SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Discovered(list))) => {
                         for (peer_id, _multiaddr) in list {
-                            println!("mDNS discovered a new peer: {}", peer_id);
+                            info!("mDNS discovered a new peer: {}", peer_id);
                             self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                         }
                     },
                     SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Expired(list))) => {
                         for (peer_id, _multiaddr) in list {
-                            println!("mDNS discover peer has expired: {}", peer_id);
+                            info!("mDNS discover peer has expired: {}", peer_id);
                             self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
                         }
                     },

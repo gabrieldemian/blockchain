@@ -14,7 +14,7 @@ async fn main() {
 
     let (tx, rx) = mpsc::unbounded_channel::<Event>();
 
-    let blockchain = Blockchain::new(5, tx.clone()).await;
+    let blockchain = Blockchain::new(4, tx.clone()).await;
 
     if let Err(ref e) = blockchain {
         match e.kind() {
@@ -31,23 +31,12 @@ async fn main() {
         panic!("Breaking program due to fatal error.");
     }
 
-    let mut blockchain = blockchain.unwrap();
-    let mut p2p = P2P::new(rx);
+    let blockchain = blockchain.unwrap();
+    let mut p2p = P2P::new(rx, blockchain);
 
     let daemon_handle = spawn(async move {
         p2p.daemon().await;
     });
 
-    // data race if I try to add 2 blocks
-    let handle = spawn(async move {
-        blockchain
-            .add_block("This will be the second".to_string())
-            .await;
-        // blockchain
-        //     .add_block("May God have mercy on me".to_string())
-        //     .await;
-    });
-
     daemon_handle.await.unwrap();
-    handle.await.unwrap();
 }

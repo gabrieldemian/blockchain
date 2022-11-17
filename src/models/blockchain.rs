@@ -61,7 +61,7 @@ impl Blockchain {
 
         Ok(buf)
     }
-    async fn read_all(&mut self) -> io::Result<Vec<Block>> {
+    pub async fn read_all(&mut self) -> io::Result<Vec<Block>> {
         let now = Instant::now();
         let buf: Vec<u8> = self.read_all_buf().await.expect("read all buf");
         let chain = Vec::<Block>::read_from_buffer(&buf[..]).expect("to read from buffer");
