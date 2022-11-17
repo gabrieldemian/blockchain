@@ -1,9 +1,12 @@
-use super::blockchain::Blockchain;
+use super::blockchain;
 use chrono::prelude::*;
 use log::{debug, info, warn};
+use once_cell::sync::Lazy;
 use sha2::{Digest, Sha256};
 use speedy::{Readable, Writable};
 use tokio::time::Instant;
+
+static DIFFICULTY: Lazy<usize> = Lazy::new(|| 4);
 
 #[derive(Debug, Clone, Writable, Readable)]
 pub struct Block {
@@ -40,10 +43,10 @@ impl Block {
 
         format!("{:x}", result)
     }
-    pub fn mine(&mut self, blockchain: &Blockchain) {
+    pub fn mine(&mut self) {
         let now = Instant::now();
         loop {
-            if !self.hash.starts_with(&"0".repeat(blockchain.difficulty)) {
+            if !self.hash.starts_with(&"0".repeat(*DIFFICULTY)) {
                 self.nonce += 1;
                 self.hash = self.calculate_hash();
             } else {
@@ -56,9 +59,8 @@ impl Block {
             }
         }
     }
-    pub async fn validate(&self, blockchain: &mut Blockchain) -> Result<(), String> {
-        let previous_block = blockchain
-            .get_latest_block()
+    pub async fn validate(&self) -> Result<(), String> {
+        let previous_block = blockchain::get_latest_block()
             .await
             .map_err(|e| e.to_string())?;
 

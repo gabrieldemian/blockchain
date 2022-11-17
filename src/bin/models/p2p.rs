@@ -1,4 +1,7 @@
-use crate::models::{block::Block, blockchain::Blockchain};
+use crate::{
+    models::{block::Block, blockchain},
+    CHANNEL,
+};
 use async_std::io;
 use futures::prelude::*;
 use libp2p::{
@@ -19,11 +22,13 @@ use log::{debug, info, warn};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use speedy::Readable;
-use tokio::{io::AsyncWriteExt, select, sync::mpsc, time::Instant};
+use tokio::{io::AsyncWriteExt, select, spawn, time::Instant};
 
 static LOCAL_KEY: Lazy<Keypair> = Lazy::new(|| Keypair::generate_ed25519());
 static LOCAL_PEER_ID: Lazy<PeerId> = Lazy::new(|| PeerId::from(LOCAL_KEY.public()));
 static TOPIC: Lazy<IdentTopic> = Lazy::new(|| IdentTopic::new("gossip"));
+// static CHANNEL: Lazy<fn() -> (UnboundedSender<Event>, UnboundedReceiver<Event>)> =
+//     Lazy::new(|| mpsc::unbounded_channel::<Event>);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChainResponse {
@@ -45,12 +50,12 @@ pub struct AppBehaviour {
 
 pub struct P2P {
     pub swarm: Swarm<AppBehaviour>,
-    pub rx: mpsc::UnboundedReceiver<Event>,
-    pub blockchain: Blockchain,
+    // pub rx: mpsc::UnboundedReceiver<Event>,
+    // pub tx: mpsc::UnboundedSender<Event>,
 }
 
 impl P2P {
-    pub fn new(rx: mpsc::UnboundedReceiver<Event>, blockchain: Blockchain) -> Self {
+    pub async fn new() -> Self {
         // encrypted TCP transport over mplex
         let transport_config = GenTcpConfig::new().port_reuse(true);
         let transport = tcp::TokioTcpTransport::new(transport_config)
@@ -96,11 +101,7 @@ impl P2P {
 
         swarm.listen_on(addr).expect("could not listen on swarm");
 
-        Self {
-            swarm,
-            rx,
-            blockchain,
-        }
+        Self { swarm }
     }
 
     pub async fn daemon(&mut self) {
@@ -131,45 +132,52 @@ impl P2P {
         println!("           ||     ||");
         println!("\n");
 
+        spawn(async {
+            loop {
+                crossbeam_channel::select! {
+                    recv(CHANNEL.1) -> event => {
+                        match event.unwrap() {
+                            Event::BlockMined(mut blocks) => {
+                                let rcv_chain =
+                                    Vec::<Block>::read_from_buffer(&mut blocks[..]).unwrap();
+
+                                info!("validating chain with the new block... {:#?}", rcv_chain);
+
+                                let now = Instant::now();
+                                let is_valid = Block::validate_all(&rcv_chain).is_ok();
+
+                                if is_valid {
+                                    info!("chain is valid and took {}ms to validate", now.elapsed().as_millis());
+                                    debug!("chain is valid");
+                                    let mut file = blockchain::open().await;
+                                    match file.write_all(&blocks[..]).await {
+                                        Ok(_) => {
+                                            info!(
+                                                "The new blockchain was written in {}μs with success",
+                                                now.elapsed().as_micros()
+                                            );
+                                        },
+                                        Err(_) => warn!("error trying to write new blockchain to the file")
+                                    }
+                                } else {
+                                    warn!("chain is invalid");
+                                }
+                            }
+                        };
+                    }
+                }
+            }
+        });
+
         // Listen for events on the P2P network, and react to them
         loop {
             select! {
-                event = self.rx.recv() => {
-                    match event.unwrap() {
-                        Event::BlockMined(mut blocks) => {
-                            let rcv_chain =
-                                Vec::<Block>::read_from_buffer(&mut blocks[..]).unwrap();
-
-                            info!("validating chain with the new block... {:#?}", rcv_chain);
-
-                            let now = Instant::now();
-                            let is_valid = Block::validate_all(&rcv_chain).is_ok();
-
-                            if is_valid {
-                                info!("chain is valid and took {}ms to validate", now.elapsed().as_millis());
-                                debug!("chain is valid");
-                                let mut file = Blockchain::open().await;
-                                match file.write_all(&blocks[..]).await {
-                                    Ok(_) => {
-                                        info!(
-                                            "The new blockchain was written in {}μs with success",
-                                            now.elapsed().as_micros()
-                                        );
-                                    },
-                                    Err(_) => warn!("error trying to write new blockchain to the file")
-                                }
-                            } else {
-                                warn!("chain is invalid");
-                            }
-                        }
-                    };
-                },
                 line = stdin.select_next_some() => {
                     let msg = line.unwrap();
 
                     match msg.as_str() {
                         "ls blockchain" => {
-                            let chain = self.blockchain.read_all().await.unwrap();
+                            let chain = blockchain::read_all().await.unwrap();
                             println!("{:#?}", chain);
                         },
                         "ls peers" => {
@@ -208,11 +216,6 @@ impl P2P {
                                 "\n{truncated_peer_id}: {}",
                                 String::from_utf8_lossy(&message.data)
                             );
-                        // self.swarm
-                        //     .behaviour()
-                        //     .gossipsub
-                        //     .all_peers()
-                        //     .for_each(|peer| println!("peer {:?}", peer));
                     },
                     SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Discovered(list))) => {
                         for (peer_id, _multiaddr) in list {
