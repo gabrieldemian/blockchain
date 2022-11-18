@@ -1,16 +1,12 @@
-use crate::{
-    models::{block::Block, blockchain},
-    CHANNEL,
-};
+use crate::models::{block::Block, blockchain, TOPIC};
 use async_std::io;
 use futures::prelude::*;
 use libp2p::{
     core::upgrade,
     futures::StreamExt,
-    gossipsub::{
-        Gossipsub, GossipsubConfig, GossipsubEvent, IdentTopic, MessageAuthenticity, TopicHash,
-    },
+    gossipsub::{Gossipsub, GossipsubConfig, GossipsubEvent, MessageAuthenticity, TopicHash},
     identity::Keypair,
+    kad::{store::MemoryStore, Kademlia, KademliaEvent},
     mdns::{MdnsEvent, TokioMdns},
     mplex,
     noise::NoiseAuthenticated,
@@ -19,49 +15,56 @@ use libp2p::{
     Multiaddr, NetworkBehaviour, PeerId, Swarm, Transport,
 };
 use log::{debug, info, warn};
-use once_cell::sync::Lazy;
-use serde::{Deserialize, Serialize};
+// use serde::{Deserialize, Serialize};
 use speedy::Readable;
-use tokio::{io::AsyncWriteExt, select, spawn, time::Instant};
+use tokio::{
+    io::AsyncWriteExt,
+    select,
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    time::Instant,
+};
 
-static LOCAL_KEY: Lazy<Keypair> = Lazy::new(|| Keypair::generate_ed25519());
-static LOCAL_PEER_ID: Lazy<PeerId> = Lazy::new(|| PeerId::from(LOCAL_KEY.public()));
-static TOPIC: Lazy<IdentTopic> = Lazy::new(|| IdentTopic::new("gossip"));
-// static CHANNEL: Lazy<fn() -> (UnboundedSender<Event>, UnboundedReceiver<Event>)> =
-//     Lazy::new(|| mpsc::unbounded_channel::<Event>);
-
-#[derive(Debug, Serialize, Deserialize)]
+// #[derive(Debug, Serialize, Deserialize)]
 pub struct ChainResponse {
     pub blocks: Vec<u8>,
-    pub receiver: String,
+    // pub receiver: String,
 }
 
 pub enum Event {
     BlockMined(Vec<u8>),
+    Liebe,
 }
 
 // defines the behaviour of the current peer
 // on the network
 #[derive(NetworkBehaviour)]
 pub struct AppBehaviour {
-    gossipsub: Gossipsub,
-    mdns: TokioMdns,
+    pub gossipsub: Gossipsub,
+    pub kademlia: Kademlia<MemoryStore>,
+    // mdns: TokioMdns,
 }
 
 pub struct P2P {
     pub swarm: Swarm<AppBehaviour>,
-    // pub rx: mpsc::UnboundedReceiver<Event>,
-    // pub tx: mpsc::UnboundedSender<Event>,
+    pub local_key: PeerId,
+    pub s: UnboundedSender<Event>,
+    pub r: UnboundedReceiver<Event>,
 }
 
 impl P2P {
     pub async fn new() -> Self {
-        // encrypted TCP transport over mplex
+        let (s, r) = mpsc::unbounded_channel::<Event>();
+
+        // let mut bytes = std::fs::read("private2.pk8").unwrap();
+        // let keypair = Keypair::rsa_from_pkcs8(&mut bytes).unwrap();
+        let keypair = Keypair::generate_ed25519();
+        let local_key = PeerId::from(keypair.public());
+
         let transport_config = GenTcpConfig::new().port_reuse(true);
         let transport = tcp::TokioTcpTransport::new(transport_config)
             .upgrade(upgrade::Version::V1)
             .authenticate(
-                NoiseAuthenticated::xx(&LOCAL_KEY)
+                NoiseAuthenticated::xx(&keypair)
                     .expect("Signing libp2p-noise static DH keypair failed."),
             )
             .multiplex(mplex::MplexConfig::new())
@@ -69,7 +72,11 @@ impl P2P {
 
         // Set the message authenticity - How we expect to publish messages
         // Here we expect the publisher to sign the message with their key.
-        let message_authenticity = MessageAuthenticity::Signed(LOCAL_KEY.clone());
+        let message_authenticity = MessageAuthenticity::Signed(keypair.clone());
+
+        // Peer discovery protocols.
+        let mdns = TokioMdns::new(Default::default()).unwrap();
+        let kademlia = Kademlia::new(local_key, MemoryStore::new(local_key));
 
         let gossipsub_config = GossipsubConfig::default();
         let mut gossipsub = Gossipsub::new(message_authenticity, gossipsub_config)
@@ -81,9 +88,13 @@ impl P2P {
 
         // Create a Swarm to manage peers and events
         let mut swarm = {
-            let mdns = TokioMdns::new(Default::default()).unwrap();
-            let behaviour = AppBehaviour { gossipsub, mdns };
-            SwarmBuilder::new(transport, behaviour, *LOCAL_PEER_ID)
+            // let mdns = TokioMdns::new(Default::default()).unwrap();
+            let behaviour = AppBehaviour {
+                gossipsub,
+                // mdns,
+                kademlia,
+            };
+            SwarmBuilder::new(transport, behaviour, local_key)
                 // We want the connection background tasks to be spawned
                 // onto the tokio runtime.
                 .executor(Box::new(|fut| {
@@ -101,11 +112,17 @@ impl P2P {
 
         swarm.listen_on(addr).expect("could not listen on swarm");
 
-        Self { swarm }
+        Self {
+            swarm,
+            local_key,
+            s,
+            r,
+        }
     }
 
     pub async fn daemon(&mut self) {
         // Listen for user input
+        // let (s, r) = unbounded();
         let mut stdin = io::BufReader::new(io::stdin()).lines().fuse();
 
         // Dial the peer identified by the multi-address given as the second
@@ -114,7 +131,7 @@ impl P2P {
         if let Some(addr) = std::env::args().nth(1) {
             let remote: Multiaddr = addr.parse().unwrap();
             self.swarm.dial(remote).unwrap();
-            println!("Dialed {}", addr)
+            println!("Dialed {}", addr);
         }
 
         let message =
@@ -132,46 +149,42 @@ impl P2P {
         println!("           ||     ||");
         println!("\n");
 
-        spawn(async {
-            loop {
-                crossbeam_channel::select! {
-                    recv(CHANNEL.1) -> event => {
-                        match event.unwrap() {
-                            Event::BlockMined(mut blocks) => {
-                                let rcv_chain =
-                                    Vec::<Block>::read_from_buffer(&mut blocks[..]).unwrap();
-
-                                info!("validating chain with the new block... {:#?}", rcv_chain);
-
-                                let now = Instant::now();
-                                let is_valid = Block::validate_all(&rcv_chain).is_ok();
-
-                                if is_valid {
-                                    info!("chain is valid and took {}ms to validate", now.elapsed().as_millis());
-                                    debug!("chain is valid");
-                                    let mut file = blockchain::open().await;
-                                    match file.write_all(&blocks[..]).await {
-                                        Ok(_) => {
-                                            info!(
-                                                "The new blockchain was written in {}μs with success",
-                                                now.elapsed().as_micros()
-                                            );
-                                        },
-                                        Err(_) => warn!("error trying to write new blockchain to the file")
-                                    }
-                                } else {
-                                    warn!("chain is invalid");
-                                }
-                            }
-                        };
-                    }
-                }
-            }
-        });
-
-        // Listen for events on the P2P network, and react to them
+        // Listen to events on the P2P network, and user input (for now).
         loop {
             select! {
+                event = self.r.recv() => {
+                    match event.unwrap() {
+                        Event::Liebe => {
+                            info!("-------------------LIEBE");
+                        },
+                        Event::BlockMined(mut blocks) => {
+                            let rcv_chain =
+                            Vec::<Block>::read_from_buffer(&mut blocks[..]).unwrap();
+
+                            info!("validating chain with the new block... {:#?}", rcv_chain);
+
+                            let now = Instant::now();
+                            let is_valid = Block::validate_all(&rcv_chain).is_ok();
+
+                            if is_valid {
+                                info!("chain is valid and took {}ms to validate", now.elapsed().as_millis());
+                                debug!("chain is valid");
+                                let mut file = blockchain::open().await;
+                                match file.write_all(&blocks[..]).await {
+                                    Ok(_) => {
+                                        info!(
+                                            "The new blockchain was written in {}μs with success",
+                                            now.elapsed().as_micros()
+                                        );
+                                    },
+                                    Err(_) => warn!("error trying to write new blockchain to the file")
+                                }
+                            } else {
+                                warn!("chain is invalid");
+                            }
+                        }
+                    };
+                }
                 line = stdin.select_next_some() => {
                     let msg = line.unwrap();
 
@@ -202,33 +215,41 @@ impl P2P {
                         address,
                         listener_id
                     } => {
-                        info!("{:?} listening on {:?}", listener_id, address);
-                    },
+                            info!("{:?} listening on {:?}", listener_id, address);
+                        },
+                    SwarmEvent::IncomingConnection { .. } => {},
+                    SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
+                        if endpoint.is_dialer() {
+                            info!("Connection established - peerid: {peer_id}");
+                            info!("endpoint is dialer: {:#?}", endpoint);
+                        }
+                    }
                     SwarmEvent::Behaviour(AppBehaviourEvent::Gossipsub(GossipsubEvent::Message {
                         message,
                         propagation_source: peer,
                         ..
                     })) => {
-                        // get the last 7 characters of the peerID
-                        let peer = peer.to_string();
-                        let truncated_peer_id = peer[peer.len() - 7..].to_string();
-                        println!(
+                            // get the last 7 characters of the peerID
+                            let peer = peer.to_string();
+                            let truncated_peer_id = peer[peer.len() - 7..].to_string();
+                            println!(
                                 "\n{truncated_peer_id}: {}",
                                 String::from_utf8_lossy(&message.data)
                             );
-                    },
-                    SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Discovered(list))) => {
-                        for (peer_id, _multiaddr) in list {
-                            info!("mDNS discovered a new peer: {}", peer_id);
-                            self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                        }
-                    },
-                    SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Expired(list))) => {
-                        for (peer_id, _multiaddr) in list {
-                            info!("mDNS discover peer has expired: {}", peer_id);
-                            self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
-                        }
-                    },
+                        },
+                    // SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Discovered(list))) => {
+                    //     for (peer_id, _multiaddr) in list {
+                    //         info!("mDNS discovered a new peer: {}", peer_id);
+                    //         self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                    //     }
+                    // },
+                    // SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Expired(list))) => {
+                    //     for (peer_id, _multiaddr) in list {
+                    //         info!("mDNS discover peer has expired: {}", peer_id);
+                    //         self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
+                    //     }
+                    // },
+                    SwarmEvent::Dialing(peer_id) => println!("Dialing {peer_id}"),
                     _ => {}
                 },
             };

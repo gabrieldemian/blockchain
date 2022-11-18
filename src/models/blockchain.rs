@@ -1,6 +1,5 @@
 use super::{block::Block, p2p::Event};
 use chrono::prelude::*;
-use crossbeam_channel::Sender;
 use log::{debug, error, info, warn};
 use speedy::{Readable, Writable};
 use tokio::{
@@ -51,9 +50,6 @@ pub async fn open() -> File {
 
 //     Ok(())
 // }
-pub fn get_channel() -> (UnboundedSender<Event>, UnboundedReceiver<Event>) {
-    mpsc::unbounded_channel::<Event>()
-}
 pub async fn read_all_buf() -> io::Result<Vec<u8>> {
     let mut buf: Vec<u8> = Vec::new();
     open().await.read_to_end(&mut buf).await?;
@@ -74,7 +70,7 @@ pub async fn read_all() -> io::Result<Vec<Block>> {
 }
 // a block will only be pushed to the blockchain,
 // once it has been validated and mined.
-pub async fn add_block(data: String, tx: Sender<Event>) {
+pub async fn add_block(data: String, s: UnboundedSender<Event>) {
     let mut blockchain = read_all()
         .await
         .expect("to read blockchain before add block");
@@ -102,7 +98,7 @@ pub async fn add_block(data: String, tx: Sender<Event>) {
 
             let chain = blockchain.write_to_vec().unwrap();
 
-            if let Err(e) = tx.send(Event::BlockMined(chain)) {
+            if let Err(e) = s.send(Event::BlockMined(chain)) {
                 error!(
                     "Failed to send event to the network that the block was mined. Reason: {}",
                     e.to_string()
