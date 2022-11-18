@@ -200,16 +200,15 @@ impl P2P {
                                 .all_peers().collect();
                             println!("{:#?}", peers);
                         },
-                        _ => println!("You typed an unknown command.")
+                        _ => {
+                            if let Err(e) = self.swarm
+                                .behaviour_mut().gossipsub
+                                .publish(TOPIC.clone(), msg.as_bytes()) {
+                                    println!("Publish error: {:?}", e);
+                                }
+                        }
                     }
                 },
-                // line = stdin.select_next_some() => {
-                //     if let Err(e) = self.swarm
-                //         .behaviour_mut().gossipsub
-                //         .publish(TOPIC.clone(), line.unwrap().as_bytes()) {
-                //             println!("Publish error: {:?}", e);
-                //         }
-                // },
                 swarm_event = self.swarm.select_next_some() => match swarm_event {
                     SwarmEvent::NewListenAddr {
                         address,
