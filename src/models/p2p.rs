@@ -42,7 +42,7 @@ pub enum Event {
 #[derive(NetworkBehaviour)]
 pub struct AppBehaviour {
     pub gossipsub: Gossipsub,
-    pub kademlia: Kademlia<MemoryStore>,
+    // pub kademlia: Kademlia<MemoryStore>,
     mdns: TokioMdns,
 }
 
@@ -97,7 +97,7 @@ impl P2P {
             let behaviour = AppBehaviour {
                 gossipsub,
                 mdns,
-                kademlia,
+                // kademlia,
             };
             SwarmBuilder::new(transport, behaviour, local_key)
                 // We want the connection background tasks to be spawned
@@ -244,7 +244,7 @@ impl P2P {
                         for (peer_id, multiaddr) in list {
                             info!("mDNS discovered a new peer: {}", peer_id);
                             self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                            self.swarm.behaviour_mut().kademlia.add_address(&peer_id, multiaddr);
+                            // self.swarm.behaviour_mut().kademlia.add_address(&peer_id, multiaddr);
                         }
                     },
                     SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Expired(list))) => {
@@ -253,10 +253,10 @@ impl P2P {
                             self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
                         }
                     },
-                    SwarmEvent::Behaviour(AppBehaviourEvent::Kademlia(KademliaEvent::RoutingUpdated{ peer, addresses, .. })) => {
-                        info!("routing updated with {peer}");
-                        info!("addresses known of this peer {:#?}", addresses);
-                    },
+                    // SwarmEvent::Behaviour(AppBehaviourEvent::Kademlia(KademliaEvent::RoutingUpdated{ peer, addresses, .. })) => {
+                    //     info!("routing updated with {peer}");
+                    //     info!("addresses known of this peer {:#?}", addresses);
+                    // },
                     SwarmEvent::Dialing(peer_id) => info!("Dialing {peer_id}"),
                     _ => {}
                 },
