@@ -7,8 +7,8 @@ use libp2p::{
     gossipsub::{Gossipsub, GossipsubConfig, GossipsubEvent, MessageAuthenticity, TopicHash},
     identity::Keypair,
     kad::{
-        record::Key, store::MemoryStore, AddProviderOk, Kademlia, KademliaEvent, PeerRecord,
-        PutRecordOk, QueryResult, Quorum, Record,
+        record::Key, store::MemoryStore, AddProviderOk, GetClosestPeersOk, Kademlia, KademliaEvent,
+        PeerRecord, PutRecordOk, QueryResult, Quorum, Record,
     },
     mdns::{MdnsEvent, TokioMdns},
     mplex,
@@ -150,6 +150,11 @@ impl P2P {
         println!("           ||----w |");
         println!("           ||     ||");
         println!("\n");
+
+        self.swarm
+            .behaviour_mut()
+            .kademlia
+            .get_closest_peers(self.local_key.to_bytes());
 
         // Listen to events on the P2P network, and user input (for now).
         loop {
@@ -331,7 +336,7 @@ impl P2P {
                         match result {
                             QueryResult::GetProviders(Ok(ok)) => {
                                 for peer in ok.providers {
-                                    println!(
+                                    info!(
                                         "Peer {:?} provides key {:?}",
                                         peer,
                                         std::str::from_utf8(ok.key.as_ref()).unwrap()
@@ -344,7 +349,7 @@ impl P2P {
                                     ..
                                 } in ok.records
                                 {
-                                    println!(
+                                    info!(
                                         "Got record {:?} {:?}",
                                         std::str::from_utf8(key.as_ref()).unwrap(),
                                         std::str::from_utf8(&value).unwrap(),
@@ -352,16 +357,22 @@ impl P2P {
                                 }
                             },
                             QueryResult::PutRecord(Ok(PutRecordOk { key })) => {
-                                println!(
+                                info!(
                                     "Successfully put record {:?}",
                                     std::str::from_utf8(key.as_ref()).unwrap()
                                 );
                             },
                             QueryResult::StartProviding(Ok(AddProviderOk { key })) => {
-                                println!(
+                                info!(
                                     "Successfully put provider record {:?}",
                                     std::str::from_utf8(key.as_ref()).unwrap()
                                 );
+                            },
+                            QueryResult::GetClosestPeers(Ok(GetClosestPeersOk { peers, .. })) => {
+                                info!(
+                                    "Successfully got the closest peer",
+                                );
+                                info!("the peers are: {:#?}", peers);
                             }
                             _ => {}
                         };
