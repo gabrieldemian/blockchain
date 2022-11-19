@@ -113,6 +113,7 @@ impl P2P {
             .expect("could not parse multiaddr");
 
         swarm.listen_on(addr).expect("could not listen on swarm");
+        info!("Your PeerID is {local_key}");
 
         Self {
             swarm,
@@ -231,10 +232,10 @@ impl P2P {
                         ..
                     })) => {
                             // get the last 7 characters of the peerID
-                            let peer = peer.to_string();
-                            let truncated_peer_id = peer[peer.len() - 7..].to_string();
+                            // let peer = peer.to_string();
+                            // let truncated_peer_id = peer[peer.len() - 7..].to_string();
                             println!(
-                                "\n{truncated_peer_id}: {}",
+                                "\n{peer}: {}",
                                 String::from_utf8_lossy(&message.data)
                             );
                         },
