@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::models::{block::Block, blockchain, TOPIC};
 use async_std::io;
 use futures::prelude::*;
@@ -6,7 +8,7 @@ use libp2p::{
     futures::StreamExt,
     gossipsub::{Gossipsub, GossipsubConfig, GossipsubEvent, MessageAuthenticity, TopicHash},
     identity::Keypair,
-    kad::{store::MemoryStore, Kademlia, KademliaEvent},
+    kad::{store::MemoryStore, Kademlia, KademliaConfig, KademliaEvent},
     mdns::{MdnsEvent, TokioMdns},
     mplex,
     noise::NoiseAuthenticated,
@@ -41,7 +43,7 @@ pub enum Event {
 pub struct AppBehaviour {
     pub gossipsub: Gossipsub,
     pub kademlia: Kademlia<MemoryStore>,
-    // mdns: TokioMdns,
+    mdns: TokioMdns,
 }
 
 pub struct P2P {
@@ -76,6 +78,9 @@ impl P2P {
 
         // Peer discovery protocols.
         let mdns = TokioMdns::new(Default::default()).unwrap();
+
+        // let kademilia_config =
+        //     KademliaConfig::default().set_protocol_names(vec![Cow::from(b"demian".to_owned())]);
         let kademlia = Kademlia::new(local_key, MemoryStore::new(local_key));
 
         let gossipsub_config = GossipsubConfig::default();
@@ -91,7 +96,7 @@ impl P2P {
             // let mdns = TokioMdns::new(Default::default()).unwrap();
             let behaviour = AppBehaviour {
                 gossipsub,
-                // mdns,
+                mdns,
                 kademlia,
             };
             SwarmBuilder::new(transport, behaviour, local_key)
@@ -106,9 +111,6 @@ impl P2P {
         let addr: Multiaddr = "/ip4/0.0.0.0/tcp/0"
             .parse()
             .expect("could not parse multiaddr");
-
-        println!("Listening on {:?}", addr);
-        println!("{:?}", swarm.local_peer_id());
 
         swarm.listen_on(addr).expect("could not listen on swarm");
 
@@ -236,19 +238,25 @@ impl P2P {
                                 String::from_utf8_lossy(&message.data)
                             );
                         },
-                    // SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Discovered(list))) => {
-                    //     for (peer_id, _multiaddr) in list {
-                    //         info!("mDNS discovered a new peer: {}", peer_id);
-                    //         self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                    //     }
-                    // },
-                    // SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Expired(list))) => {
-                    //     for (peer_id, _multiaddr) in list {
-                    //         info!("mDNS discover peer has expired: {}", peer_id);
-                    //         self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
-                    //     }
-                    // },
-                    SwarmEvent::Dialing(peer_id) => println!("Dialing {peer_id}"),
+                    // will notify RoutingUpdated if kademilia_add_address is successfull.
+                    SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Discovered(list))) => {
+                        for (peer_id, multiaddr) in list {
+                            info!("mDNS discovered a new peer: {}", peer_id);
+                            self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                            self.swarm.behaviour_mut().kademlia.add_address(&peer_id, multiaddr);
+                        }
+                    },
+                    SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Expired(list))) => {
+                        for (peer_id, _multiaddr) in list {
+                            info!("mDNS discover peer has expired: {}", peer_id);
+                            self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
+                        }
+                    },
+                    SwarmEvent::Behaviour(AppBehaviourEvent::Kademlia(KademliaEvent::RoutingUpdated{ peer, addresses, .. })) => {
+                        info!("routing updated with {peer}");
+                        info!("addresses known of this peer {:#?}", addresses);
+                    },
+                    SwarmEvent::Dialing(peer_id) => info!("Dialing {peer_id}"),
                     _ => {}
                 },
             };
