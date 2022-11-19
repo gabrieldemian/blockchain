@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use crate::models::{block::Block, blockchain, TOPIC};
 use async_std::io;
 use futures::prelude::*;
@@ -8,7 +6,10 @@ use libp2p::{
     futures::StreamExt,
     gossipsub::{Gossipsub, GossipsubConfig, GossipsubEvent, MessageAuthenticity, TopicHash},
     identity::Keypair,
-    kad::{store::MemoryStore, Kademlia, KademliaConfig, KademliaEvent},
+    kad::{
+        record::Key, store::MemoryStore, AddProviderOk, Kademlia, KademliaEvent, PeerRecord,
+        PutRecordOk, QueryResult, Quorum, Record,
+    },
     mdns::{MdnsEvent, TokioMdns},
     mplex,
     noise::NoiseAuthenticated,
@@ -17,7 +18,6 @@ use libp2p::{
     Multiaddr, NetworkBehaviour, PeerId, Swarm, Transport,
 };
 use log::{debug, info, warn};
-// use serde::{Deserialize, Serialize};
 use speedy::Readable;
 use tokio::{
     io::AsyncWriteExt,
@@ -26,7 +26,6 @@ use tokio::{
     time::Instant,
 };
 
-// #[derive(Debug, Serialize, Deserialize)]
 pub struct ChainResponse {
     pub blocks: Vec<u8>,
     // pub receiver: String,
@@ -42,8 +41,8 @@ pub enum Event {
 #[derive(NetworkBehaviour)]
 pub struct AppBehaviour {
     pub gossipsub: Gossipsub,
-    // pub kademlia: Kademlia<MemoryStore>,
-    mdns: TokioMdns,
+    pub kademlia: Kademlia<MemoryStore>,
+    pub mdns: TokioMdns,
 }
 
 pub struct P2P {
@@ -97,7 +96,7 @@ impl P2P {
             let behaviour = AppBehaviour {
                 gossipsub,
                 mdns,
-                // kademlia,
+                kademlia,
             };
             SwarmBuilder::new(transport, behaviour, local_key)
                 // We want the connection background tasks to be spawned
@@ -189,26 +188,96 @@ impl P2P {
                     };
                 }
                 line = stdin.select_next_some() => {
-                    let msg = line.unwrap();
+                    let args = line.unwrap();
+                    let mut args = args.split(' ');
 
-                    match msg.as_str() {
-                        "ls blockchain" => {
+                    match args.next() {
+                        Some("ls_blocks") => {
                             let chain = blockchain::read_all().await.unwrap();
                             println!("{:#?}", chain);
                         },
-                        "ls peers" => {
+                        Some("ls_peers") => {
                             let peers: Vec<(&PeerId, Vec<&TopicHash>)> = self.swarm
                                 .behaviour()
                                 .gossipsub
                                 .all_peers().collect();
+
                             println!("{:#?}", peers);
-                        },
-                        _ => {
-                            if let Err(e) = self.swarm
-                                .behaviour_mut().gossipsub
-                                .publish(TOPIC.clone(), msg.as_bytes()) {
-                                    println!("Publish error: {:?}", e);
+
+                            let key = {
+                                match args.next() {
+                                    Some(key) => Key::new(&key),
+                                    None => {
+                                        eprintln!("Expected key");
+                                        return;
+                                    }
                                 }
+                            };
+                            self.swarm.behaviour_mut().kademlia.get_providers(key);
+                        },
+                        Some("GET") => {
+                            let key = {
+                                match args.next() {
+                                    Some(key) => Key::new(&key),
+                                    None => {
+                                        eprintln!("Expected key");
+                                        return;
+                                    }
+                                }
+                            };
+                            self.swarm.behaviour_mut().kademlia.get_record(key, Quorum::One);
+                        },
+                        Some("PUT") => {
+                            let key = {
+                                match args.next() {
+                                    Some(key) => Key::new(&key),
+                                    None => {
+                                        eprintln!("Expected key");
+                                        return;
+                                    }
+                                }
+                            };
+                            let value = {
+                                match args.next() {
+                                    Some(value) => value.as_bytes().to_vec(),
+                                    None => {
+                                        eprintln!("Expected value");
+                                        return;
+                                    }
+                                }
+                            };
+                            let record = Record {
+                                key,
+                                value,
+                                publisher: None,
+                                expires: None,
+                            };
+                            self.swarm.behaviour_mut().kademlia
+                                .put_record(record, Quorum::One)
+                                .expect("Failed to store record locally.");
+                        }
+                        Some("PUT_PROVIDER") => {
+                            let key = {
+                                match args.next() {
+                                    Some(key) => Key::new(&key),
+                                    None => {
+                                        eprintln!("Expected key");
+                                        return;
+                                    }
+                                }
+                            };
+
+                            self.swarm.behaviour_mut().kademlia
+                                .start_providing(key)
+                                .expect("Failed to start providing key");
+                        }
+                        _ => {
+                            eprintln!("expected GET, GET_PROVIDERS, PUT or PUT_PROVIDER");
+                            // if let Err(e) = self.swarm
+                            //     .behaviour_mut().gossipsub
+                            //     .publish(TOPIC.clone(), args.next().unwrap().as_bytes()) {
+                            //         println!("Publish error: {:?}", e);
+                            //     }
                         }
                     }
                 },
@@ -218,12 +287,12 @@ impl P2P {
                         listener_id
                     } => {
                             info!("{:?} listening on {:?}", listener_id, address);
+                            // self.swarm.behaviour_mut().kademlia.add_address(&self.local_key, address);
                         },
                     SwarmEvent::IncomingConnection { .. } => {},
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
                         if endpoint.is_dialer() {
-                            info!("Connection established - peerid: {peer_id}");
-                            info!("endpoint is dialer: {:#?}", endpoint);
+                            info!("Connection established - peerId: {peer_id}");
                         }
                     }
                     SwarmEvent::Behaviour(AppBehaviourEvent::Gossipsub(GossipsubEvent::Message {
@@ -232,19 +301,19 @@ impl P2P {
                         ..
                     })) => {
                             // get the last 7 characters of the peerID
-                            // let peer = peer.to_string();
-                            // let truncated_peer_id = peer[peer.len() - 7..].to_string();
+                            let peer = peer.to_string();
+                            let truncated_peer_id = peer[peer.len() - 7..].to_string();
                             println!(
-                                "\n{peer}: {}",
+                                "\n{truncated_peer_id}: {}",
                                 String::from_utf8_lossy(&message.data)
                             );
                         },
                     // will notify RoutingUpdated if kademilia_add_address is successfull.
                     SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Discovered(list))) => {
                         for (peer_id, multiaddr) in list {
-                            info!("mDNS discovered a new peer: {}", peer_id);
+                            info!("mDNS discovered a new peer: {peer_id} multiaddr: {multiaddr}");
                             self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                            // self.swarm.behaviour_mut().kademlia.add_address(&peer_id, multiaddr);
+                            self.swarm.behaviour_mut().kademlia.add_address(&peer_id, multiaddr);
                         }
                     },
                     SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Expired(list))) => {
@@ -253,11 +322,50 @@ impl P2P {
                             self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
                         }
                     },
-                    // SwarmEvent::Behaviour(AppBehaviourEvent::Kademlia(KademliaEvent::RoutingUpdated{ peer, addresses, .. })) => {
-                    //     info!("routing updated with {peer}");
-                    //     info!("addresses known of this peer {:#?}", addresses);
-                    // },
+                    SwarmEvent::Behaviour(AppBehaviourEvent::Kademlia(KademliaEvent::RoutingUpdated{ peer, addresses, .. })) => {
+                        info!("routing updated with {peer}");
+                        info!("addresses known of this peer {:#?}", addresses);
+                    },
                     SwarmEvent::Dialing(peer_id) => info!("Dialing {peer_id}"),
+                    SwarmEvent::Behaviour(AppBehaviourEvent::Kademlia(KademliaEvent::OutboundQueryCompleted { result, ..})) => {
+                        match result {
+                            QueryResult::GetProviders(Ok(ok)) => {
+                                for peer in ok.providers {
+                                    println!(
+                                        "Peer {:?} provides key {:?}",
+                                        peer,
+                                        std::str::from_utf8(ok.key.as_ref()).unwrap()
+                                    );
+                                }
+                            },
+                            QueryResult::GetRecord(Ok(ok)) => {
+                                for PeerRecord {
+                                    record: Record { key, value, .. },
+                                    ..
+                                } in ok.records
+                                {
+                                    println!(
+                                        "Got record {:?} {:?}",
+                                        std::str::from_utf8(key.as_ref()).unwrap(),
+                                        std::str::from_utf8(&value).unwrap(),
+                                    );
+                                }
+                            },
+                            QueryResult::PutRecord(Ok(PutRecordOk { key })) => {
+                                println!(
+                                    "Successfully put record {:?}",
+                                    std::str::from_utf8(key.as_ref()).unwrap()
+                                );
+                            },
+                            QueryResult::StartProviding(Ok(AddProviderOk { key })) => {
+                                println!(
+                                    "Successfully put provider record {:?}",
+                                    std::str::from_utf8(key.as_ref()).unwrap()
+                                );
+                            }
+                            _ => {}
+                        };
+                        }
                     _ => {}
                 },
             };
