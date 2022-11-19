@@ -42,7 +42,7 @@ pub enum Event {
 pub struct AppBehaviour {
     pub gossipsub: Gossipsub,
     pub kademlia: Kademlia<MemoryStore>,
-    pub mdns: TokioMdns,
+    // pub mdns: TokioMdns,
 }
 
 pub struct P2P {
@@ -95,7 +95,7 @@ impl P2P {
             // let mdns = TokioMdns::new(Default::default()).unwrap();
             let behaviour = AppBehaviour {
                 gossipsub,
-                mdns,
+                // mdns,
                 kademlia,
             };
             SwarmBuilder::new(transport, behaviour, local_key)
@@ -309,19 +309,19 @@ impl P2P {
                             );
                         },
                     // will notify RoutingUpdated if kademilia_add_address is successfull.
-                    SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Discovered(list))) => {
-                        for (peer_id, multiaddr) in list {
-                            info!("mDNS discovered a new peer: {peer_id} multiaddr: {multiaddr}");
-                            // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
-                            self.swarm.behaviour_mut().kademlia.add_address(&peer_id, multiaddr);
-                        }
-                    },
-                    SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Expired(list))) => {
-                        for (peer_id, _multiaddr) in list {
-                            info!("mDNS discover peer has expired: {}", peer_id);
-                            self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
-                        }
-                    },
+                    // SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Discovered(list))) => {
+                    //     for (peer_id, multiaddr) in list {
+                    //         info!("mDNS discovered a new peer: {peer_id} multiaddr: {multiaddr}");
+                    //         // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                    //         self.swarm.behaviour_mut().kademlia.add_address(&peer_id, multiaddr);
+                    //     }
+                    // },
+                    // SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Expired(list))) => {
+                    //     for (peer_id, _multiaddr) in list {
+                    //         info!("mDNS discover peer has expired: {}", peer_id);
+                    //         self.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
+                    //     }
+                    // },
                     SwarmEvent::Behaviour(AppBehaviourEvent::Kademlia(KademliaEvent::RoutingUpdated{ peer, addresses, .. })) => {
                         info!("routing updated with {peer}");
                         info!("addresses known of this peer {:#?}", addresses);
