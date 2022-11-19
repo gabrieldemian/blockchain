@@ -197,12 +197,12 @@ impl P2P {
                             println!("{:#?}", chain);
                         },
                         Some("ls_peers") => {
-                            let peers: Vec<(&PeerId, Vec<&TopicHash>)> = self.swarm
-                                .behaviour()
-                                .gossipsub
-                                .all_peers().collect();
+                            // let peers: Vec<(&PeerId, Vec<&TopicHash>)> = self.swarm
+                            //     .behaviour()
+                            //     .gossipsub
+                            //     .all_peers().collect();
 
-                            println!("{:#?}", peers);
+                            // println!("{:#?}", peers);
 
                             let key = {
                                 match args.next() {
@@ -312,7 +312,7 @@ impl P2P {
                     SwarmEvent::Behaviour(AppBehaviourEvent::Mdns(MdnsEvent::Discovered(list))) => {
                         for (peer_id, multiaddr) in list {
                             info!("mDNS discovered a new peer: {peer_id} multiaddr: {multiaddr}");
-                            self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                            // self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                             self.swarm.behaviour_mut().kademlia.add_address(&peer_id, multiaddr);
                         }
                     },
